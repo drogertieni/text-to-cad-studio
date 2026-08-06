@@ -378,6 +378,23 @@ function initUI() {
     
     // Clear selection
     document.getElementById('clear-feature-btn').addEventListener('click', clearFeatureSelection);
+
+    // Endpoint chips: choose which end the next Line/Arc continues from, and
+    // put the coordinate on the clipboard for manual use.
+    const pickEndpoint = (which) => {
+        const feat = STATE.selectedFeature;
+        if (!feat || feat.type !== 'edge') return;
+        const point = which === 'start' ? feat.start : feat.end;
+        if (!point) return;
+        preferredEndpoint = point;
+        document.getElementById('endpoint-start-btn').classList.toggle('is-active', which === 'start');
+        document.getElementById('endpoint-end-btn').classList.toggle('is-active', which === 'end');
+        const text = `(${point[0].toFixed(3)}, ${point[1].toFixed(3)}, ${point[2].toFixed(3)})`;
+        if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+        appendConsoleLog(`Next line will start at ${text}\n`);
+    };
+    document.getElementById('endpoint-start-btn').addEventListener('click', () => pickEndpoint('start'));
+    document.getElementById('endpoint-end-btn').addEventListener('click', () => pickEndpoint('end'));
     
     // Clear chat
     document.getElementById('clear-chat-btn').addEventListener('click', () => {
@@ -782,16 +799,32 @@ function onCanvasClick(event) {
                 normal: data.normal,
                 type: data.type,
                 bbox: data.bbox || null,
-                area: (typeof data.area === 'number') ? data.area : null
+                area: (typeof data.area === 'number') ? data.area : null,
+                start: data.start || null,
+                end: data.end || null,
+                length: (typeof data.length === 'number') ? data.length : null
             };
             
             // Show selection UI
             const featuresBox = document.getElementById('selected-features-box');
             featuresBox.classList.remove('hidden');
             document.getElementById('feature-id-label').textContent = data.id;
-            document.getElementById('feature-coord-label').textContent = 
+            document.getElementById('feature-coord-label').textContent =
                 `(${data.center[0].toFixed(2)}, ${data.center[1].toFixed(2)}, ${data.center[2].toFixed(2)})`;
-            
+
+            // Endpoints are what you need to butt the next line up against the
+            // last one, so surface them whenever an edge is picked.
+            const endpointsEl = document.getElementById('feature-endpoints');
+            if (data.type === 'edge' && data.start && data.end) {
+                document.getElementById('feature-start-label').textContent = formatPoint(data.start);
+                document.getElementById('feature-end-label').textContent = formatPoint(data.end);
+                document.getElementById('feature-length-label').textContent =
+                    (typeof data.length === 'number') ? `len ${data.length.toFixed(2)} mm` : '';
+                endpointsEl.classList.remove('hidden');
+            } else {
+                endpointsEl.classList.add('hidden');
+            }
+
             appendConsoleLog(
                 `Selected ${data.type}: ${data.id} at center [${data.center.map(c => c.toFixed(2)).join(', ')}]\n`
             );
@@ -821,7 +854,13 @@ function clearFeatureSelection() {
         STATE.three.highlightObject = null;
     }
     STATE.selectedFeature = null;
+    preferredEndpoint = null;
     document.getElementById('selected-features-box').classList.add('hidden');
+    const endpointsEl = document.getElementById('feature-endpoints');
+    if (endpointsEl) {
+        endpointsEl.classList.add('hidden');
+        endpointsEl.querySelectorAll('.endpoint-chip').forEach(b => b.classList.remove('is-active'));
+    }
     appendConsoleLog("Feature selection cleared.\n");
 }
 
@@ -1323,9 +1362,19 @@ def __wasm_run_and_tessellate(code_to_run, is_2d, target_info):
                     p1 = edge.start_point()
                     p2 = edge.end_point()
                     pts.extend([p1.X, p1.Y, p1.Z, p2.X, p2.Y, p2.Z])
+                try:
+                    sp = edge.start_point()
+                    ep = edge.end_point()
+                    endpoints = [[sp.X, sp.Y, sp.Z], [ep.X, ep.Y, ep.Z]]
+                except Exception:
+                    endpoints = None
+
                 edges_data.append({
                     "id": f"Edge_{j}",
-                    "vertices": pts
+                    "vertices": pts,
+                    "start": endpoints[0] if endpoints else None,
+                    "end": endpoints[1] if endpoints else None,
+                    "length": length
                 })
             except:
                 continue
@@ -1550,6 +1599,9 @@ function renderMesh(meshData) {
             id: edge.id,
             center,
             normal: [0, 0, 0],
+            start: edge.start || null,
+            end: edge.end || null,
+            length: (typeof edge.length === 'number') ? edge.length : null,
             type: 'edge',
             baseColor: palette.edge
         };
@@ -2243,6 +2295,28 @@ async function generateCAD(promptText) {
 // feature selected right now. Snippets must not emit a bare find_nearest_face(part):
 // that resolves against the live selection, so re-running the script after the user
 // clicks elsewhere would silently move the operation onto the new face.
+function formatPoint(p, digits = 2) {
+    return `(${p[0].toFixed(digits)}, ${p[1].toFixed(digits)}, ${p[2].toFixed(digits)})`;
+}
+
+// Which endpoint the next curve should start from. Defaults to the end of the
+// selected edge, but clicking the Start chip snaps it to the other end instead,
+// so a chain can be continued from whichever side the user means.
+let preferredEndpoint = null;
+
+function snapPointForNextCurve() {
+    if (preferredEndpoint) return preferredEndpoint;
+    const feat = STATE.selectedFeature;
+    if (feat && feat.type === 'edge' && feat.end) return feat.end;
+    return null;
+}
+
+// One axis of the snap point, rounded so the dialog shows clean numbers.
+function snapCoord(axis) {
+    const p = snapPointForNextCurve();
+    return p ? Math.round(p[axis] * 1000) / 1000 : 0;
+}
+
 // Which variable the renderer is currently displaying. A BuildLine drawing
 // assigns `sketch` even in 3D mode, so trust the script over the mode toggle.
 function activeGeometryVariable() {
@@ -2262,23 +2336,25 @@ function selectedFaceLookup(shapeVar = 'part') {
 const TOOLBAR_CONFIG = {
     line: {
         title: "Create Line",
+        // Start defaults to the selected edge's endpoint so a chain connects
+        // without the user having to read coordinates off anywhere.
         fields: [
-            { label: "Start Point X", name: "x1", type: "number", default: 0 },
-            { label: "Start Point Y", name: "y1", type: "number", default: 0 },
-            { label: "End Point X", name: "x2", type: "number", default: 10 },
-            { label: "End Point Y", name: "y2", type: "number", default: 0 }
+            { label: "Start Point X", name: "x1", type: "number", default: () => snapCoord(0) },
+            { label: "Start Point Y", name: "y1", type: "number", default: () => snapCoord(1) },
+            { label: "End Point X", name: "x2", type: "number", default: () => snapCoord(0) + 10 },
+            { label: "End Point Y", name: "y2", type: "number", default: () => snapCoord(1) }
         ],
         generator: (vals) => `Line((${vals.x1}, ${vals.y1}), (${vals.x2}, ${vals.y2}))`
     },
     arc: {
         title: "Create Three-Point Arc",
         fields: [
-            { label: "Point 1 X", name: "x1", type: "number", default: 0 },
-            { label: "Point 1 Y", name: "y1", type: "number", default: 0 },
-            { label: "Point 2 X", name: "x2", type: "number", default: 5 },
-            { label: "Point 2 Y", name: "y2", type: "number", default: 2 },
-            { label: "Point 3 X", name: "x3", type: "number", default: 10 },
-            { label: "Point 3 Y", name: "y3", type: "number", default: 0 }
+            { label: "Point 1 X", name: "x1", type: "number", default: () => snapCoord(0) },
+            { label: "Point 1 Y", name: "y1", type: "number", default: () => snapCoord(1) },
+            { label: "Point 2 X", name: "x2", type: "number", default: () => snapCoord(0) + 5 },
+            { label: "Point 2 Y", name: "y2", type: "number", default: () => snapCoord(1) + 2 },
+            { label: "Point 3 X", name: "x3", type: "number", default: () => snapCoord(0) + 10 },
+            { label: "Point 3 Y", name: "y3", type: "number", default: () => snapCoord(1) }
         ],
         generator: (vals) => `ThreePointArc((${vals.x1}, ${vals.y1}), (${vals.x2}, ${vals.y2}), (${vals.x3}, ${vals.y3}))`
     },
@@ -2667,6 +2743,16 @@ function renderParameterForm(config) {
     const container = document.getElementById('param-modal-fields');
     container.innerHTML = '';
 
+    // Tell the user when a start point was pre-filled from their selection,
+    // otherwise the non-zero defaults look arbitrary.
+    const snap = snapPointForNextCurve();
+    if (snap && (currentToolbarAction === 'line' || currentToolbarAction === 'arc')) {
+        const hint = document.createElement('div');
+        hint.className = 'param-snap-hint';
+        hint.innerHTML = `<i class="fa-solid fa-link"></i> Starting from ${formatPoint(snap)} — continues the selected edge.`;
+        container.appendChild(hint);
+    }
+
     config.fields.forEach(field => {
         const group = document.createElement('div');
         group.className = 'param-form-group';
@@ -2675,6 +2761,9 @@ function renderParameterForm(config) {
         label.textContent = field.label;
         group.appendChild(label);
 
+        // Defaults may be functions so they can react to the current selection.
+        const defaultValue = typeof field.default === 'function' ? field.default() : field.default;
+
         if (field.type === 'select') {
             const select = document.createElement('select');
             select.name = field.name;
@@ -2682,7 +2771,7 @@ function renderParameterForm(config) {
                 const o = document.createElement('option');
                 o.value = opt;
                 o.textContent = opt;
-                if (opt === field.default) o.selected = true;
+                if (opt === defaultValue) o.selected = true;
                 select.appendChild(o);
             });
             group.appendChild(select);
@@ -2690,7 +2779,7 @@ function renderParameterForm(config) {
             const input = document.createElement('input');
             input.type = field.type;
             input.name = field.name;
-            input.value = field.default;
+            input.value = defaultValue;
             group.appendChild(input);
         }
 

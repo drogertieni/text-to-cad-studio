@@ -15,7 +15,7 @@
     <script src="https://cdn.jsdelivr.net/pyodide/v0.29.4/full/pyodide.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
     
-    <link rel="stylesheet" href="index.css?v=20260806a">
+    <link rel="stylesheet" href="index.css?v=20260806b">
 </head>
 <body>
     <!-- App Header -->
@@ -151,6 +151,15 @@
                 <div class="feature-info">
                     <span class="feature-badge"><i class="fa-solid fa-tag"></i> <span id="feature-id-label">Face_0</span></span>
                     <span class="feature-coord">Center: <span id="feature-coord-label">(0.00, 0.00, 0.00)</span></span>
+                    <span class="feature-endpoints hidden" id="feature-endpoints">
+                        <button class="endpoint-chip" id="endpoint-start-btn" title="Copy — the Line tool starts here next">
+                            <i class="fa-solid fa-circle-dot"></i> Start <b id="feature-start-label">(0, 0, 0)</b>
+                        </button>
+                        <button class="endpoint-chip" id="endpoint-end-btn" title="Copy — the Line tool starts here next">
+                            <i class="fa-solid fa-circle-dot"></i> End <b id="feature-end-label">(0, 0, 0)</b>
+                        </button>
+                        <span class="feature-length" id="feature-length-label"></span>
+                    </span>
                 </div>
                 <button class="clear-feature-btn" id="clear-feature-btn" title="Clear selection">
                     <i class="fa-solid fa-xmark"></i>
@@ -333,6 +342,6 @@
     </div>
 
     <!-- App Main Script -->
-    <script src="app.js?v=20260806j"></script>
+    <script src="app.js?v=20260806k"></script>
 </body>
 </html>
