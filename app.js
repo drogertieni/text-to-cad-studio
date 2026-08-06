@@ -635,9 +635,11 @@ function initThree() {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0c0e14);
     
-    // Camera
+    // Camera. build123d is Z-up, so tell Three.js (default Y-up) to match —
+    // otherwise every asymmetric part renders lying on its side.
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.set(100, 100, 150);
+    camera.up.set(0, 0, 1);
+    camera.position.set(140, -140, 110);
     
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -662,9 +664,11 @@ function initThree() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     
-    // Grid Helper
+    // Grid Helper. GridHelper is built in the XZ plane; rotate it into XY so it
+    // acts as the Z=0 ground plane that build123d models are built on.
     const grid = new THREE.GridHelper(200, 50, 0x4fc3f7, 0x2b303b);
-    grid.position.y = -0.1;
+    grid.rotation.x = Math.PI / 2;
+    grid.position.set(0, 0, -0.1);
     scene.add(grid);
     
     // Groups for geometries
@@ -718,9 +722,13 @@ function updateViewportTheme() {
 
     const gridColors = { center: 0x9aa3ad, grid: 0xd7dde4 };
 
+    const wasVisible = STATE.three.grid.visible;
     STATE.three.scene.remove(STATE.three.grid);
     STATE.three.grid = new THREE.GridHelper(200, 50, gridColors.center, gridColors.grid);
-    STATE.three.grid.position.y = -0.1;
+    // Keep the grid in the XY plane so it stays the Z=0 ground plane (see initThree).
+    STATE.three.grid.rotation.x = Math.PI / 2;
+    STATE.three.grid.position.set(0, 0, -0.1);
+    STATE.three.grid.visible = wasVisible;
     STATE.three.scene.add(STATE.three.grid);
 }
 
@@ -846,21 +854,29 @@ function resetCamera() {
         }
     });
     
+    // Z-up framing: approach from +X / -Y and look slightly down, which reads as a
+    // conventional CAD isometric once camera.up is Z (see initThree).
+    STATE.three.camera.up.set(0, 0, 1);
+
     if (box.isEmpty()) {
-        STATE.three.camera.position.set(100, 100, 150);
+        STATE.three.camera.position.set(140, -140, 110);
         STATE.three.controls.target.set(0, 0, 0);
     } else {
         const center = new THREE.Vector3();
         box.getCenter(center);
         const size = new THREE.Vector3();
         box.getSize(size);
-        
+
         const maxDim = Math.max(size.x, size.y, size.z);
         const fov = STATE.three.camera.fov * (Math.PI / 180);
         let cameraDist = Math.abs(maxDim / 2 / Math.tan(fov / 2));
         cameraDist *= 1.5; // add buffer
-        
-        STATE.three.camera.position.set(center.x + cameraDist, center.y + cameraDist, center.z + cameraDist);
+
+        STATE.three.camera.position.set(
+            center.x + cameraDist,
+            center.y - cameraDist,
+            center.z + cameraDist * 0.8
+        );
         STATE.three.controls.target.copy(center);
     }
     STATE.three.controls.update();
