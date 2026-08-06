@@ -1,5 +1,7 @@
 # Text-to-CAD Studio
 
+[繁體中文](README.md) · **[English](README.en.md)**
+
 > 一個完全跑在瀏覽器裡的參數化 CAD 工作站：用自然語言描述零件 → LLM 產生 `build123d` Python → Pyodide (WebAssembly) 即時編譯 → Three.js 顯示，並可匯出 STEP / DXF。
 >
 > **無後端、無伺服器。** 所有幾何運算都在你的瀏覽器分頁內完成，API Key 只存在 `localStorage`。
