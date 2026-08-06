@@ -794,6 +794,56 @@ body {
     display: none;
 }
 
+/* The parameter dialog drives a live 3D preview, so it must not dim or cover
+   the viewport. Dock it to the left edge and let clicks through the backdrop. */
+.param-modal-backdrop {
+    background-color: transparent;
+    backdrop-filter: none;
+    justify-content: flex-start;
+    align-items: center;
+    padding-left: calc(var(--sidebar-width, 380px) + 24px);
+    pointer-events: none;
+}
+
+.param-modal-content {
+    pointer-events: auto;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+
+.param-preview-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    margin: 0 20px 4px;
+    border-radius: 8px;
+    font-size: 12px;
+    background: rgba(79, 195, 247, 0.10);
+    border: 1px solid rgba(79, 195, 247, 0.28);
+    color: var(--accent);
+}
+
+.param-preview-status.is-error {
+    background: rgba(239, 83, 80, 0.10);
+    border-color: rgba(239, 83, 80, 0.32);
+    color: var(--accent-error);
+}
+
+.param-preview-status.is-ready {
+    background: rgba(102, 187, 106, 0.10);
+    border-color: rgba(102, 187, 106, 0.30);
+    color: var(--accent-success, #66bb6a);
+}
+
+.param-preview-status .fa-spin {
+    font-size: 11px;
+}
+
+.param-preview-status.is-ready .fa-spin,
+.param-preview-status.is-error .fa-spin {
+    display: none;
+}
+
 .card-glass {
     background: rgba(27, 30, 36, 0.95);
     border: 1px solid var(--border-color);

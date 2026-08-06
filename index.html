@@ -15,7 +15,7 @@
     <script src="https://cdn.jsdelivr.net/pyodide/v0.29.4/full/pyodide.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
     
-    <link rel="stylesheet" href="index.css?v=20260702a">
+    <link rel="stylesheet" href="index.css?v=20260806a">
 </head>
 <body>
     <!-- App Header -->
@@ -294,8 +294,8 @@
     </div>
 
     <!-- Parameter Config Modal -->
-    <div class="modal-backdrop hidden" id="parameter-modal">
-        <div class="modal-content card-glass" style="max-width: 400px;">
+    <div class="modal-backdrop param-modal-backdrop hidden" id="parameter-modal">
+        <div class="modal-content card-glass param-modal-content" style="max-width: 400px;">
             <div class="modal-header">
                 <h3 id="param-modal-title"><i class="fa-solid fa-sliders text-accent"></i> Configure Parameters</h3>
                 <button class="close-modal-btn" id="close-param-modal-btn"><i class="fa-solid fa-xmark"></i></button>
@@ -303,6 +303,11 @@
             
             <div class="modal-body" id="param-modal-fields">
                 <!-- Dynamic form fields will be injected here -->
+            </div>
+
+            <div class="param-preview-status" id="param-preview-status">
+                <i class="fa-solid fa-circle-notch fa-spin"></i>
+                <span id="param-preview-text">Building preview…</span>
             </div>
 
             <div class="modal-footer">
@@ -328,6 +333,6 @@
     </div>
 
     <!-- App Main Script -->
-    <script src="app.js?v=20260806e"></script>
+    <script src="app.js?v=20260806g"></script>
 </body>
 </html>

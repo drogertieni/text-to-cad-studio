@@ -671,7 +671,11 @@ function initThree() {
     grid.position.set(0, 0, -0.1);
     scene.add(grid);
     
-    // Groups for geometries
+    // Groups for geometries. previewGroup holds the translucent ghost shown while
+    // a toolbar parameter dialog is open; it is never added to raycastObjects.
+    const previewGroup = new THREE.Group();
+    scene.add(previewGroup);
+
     const facesGroup = new THREE.Group();
     const edgesGroup = new THREE.Group();
     scene.add(facesGroup);
@@ -686,6 +690,7 @@ function initThree() {
         grid,
         facesGroup,
         edgesGroup,
+        previewGroup,
         highlightObject: null,
         raycastObjects: []
     };
@@ -999,8 +1004,16 @@ async function runPythonCode(pythonScript, options = {}) {
         return;
     }
 
+    // Preview runs are speculative (the user is still typing in a dialog), so they
+    // must not clear the model, write to the console tab, or record lastError.
+    const isPreview = Boolean(options.preview);
+
     // A comment-only starter template is not an error — just show an empty viewport.
     if (isEffectivelyEmptyScript(pythonScript)) {
+        if (isPreview) {
+            clearPreviewGeometry();
+            return { ok: false, error: 'Script is empty' };
+        }
         clearRenderedGeometry();
         STATE.lastError = null;
         appendConsoleLog("----------------------------------------\n");
@@ -1008,8 +1021,10 @@ async function runPythonCode(pythonScript, options = {}) {
         return true;
     }
 
-    appendConsoleLog("----------------------------------------\n");
-    appendConsoleLog("Compiling shape...\n");
+    if (!isPreview) {
+        appendConsoleLog("----------------------------------------\n");
+        appendConsoleLog("Compiling shape...\n");
+    }
     
     // Extract selected feature info for Python helper functions
     const targetInfo = STATE.selectedFeature ? {
@@ -1354,12 +1369,16 @@ __wasm_run_and_tessellate(__code_to_run, __is_2d, __target_info)
         
         const rawResult = await STATE.pyodide.runPythonAsync(pyWrapperScript);
         const result = JSON.parse(rawResult);
-        
-        if (result.stdout) {
+
+        if (result.stdout && !isPreview) {
             appendConsoleLog(result.stdout);
         }
         
         if (result.success) {
+            if (isPreview) {
+                renderPreviewMesh(result.mesh);
+                return { ok: true, mesh: result.mesh };
+            }
             appendConsoleLog("Shape compiled successfully.\n");
             if (result.export_warning) {
                 appendConsoleLog(`Export Warning: ${result.export_warning}\n`);
@@ -1369,6 +1388,12 @@ __wasm_run_and_tessellate(__code_to_run, __is_2d, __target_info)
             STATE.lastError = null;
             return true;
         } else {
+            if (isPreview) {
+                // A preview failure is expected while the user is still typing —
+                // never log it to the console tab or the chat.
+                clearPreviewGeometry();
+                return { ok: false, error: result.error };
+            }
             appendConsoleLog(`Compilation Failed: ${result.error}\n`);
             appendConsoleLog(`${result.traceback}\n`);
             displayMessage('ai', `Compilation failed: ${result.error}`, true);
@@ -1378,10 +1403,59 @@ __wasm_run_and_tessellate(__code_to_run, __is_2d, __target_info)
         }
     } catch (e) {
         console.error(e);
+        if (isPreview) {
+            clearPreviewGeometry();
+            return { ok: false, error: e.message };
+        }
         appendConsoleLog(`Runner System Error: ${e.message}\n`);
         appendConsoleLog("Previous viewport geometry preserved because the runner failed.\n");
         return false;
     }
+}
+
+// --- Toolbar live preview -------------------------------------------------
+
+function clearPreviewGeometry() {
+    if (STATE.three.previewGroup) {
+        disposeGroupChildren(STATE.three.previewGroup);
+    }
+}
+
+// Renders tessellation output as a translucent ghost. Deliberately does not
+// touch facesGroup/edgesGroup or raycastObjects, so the committed model and the
+// user's current selection are left completely alone.
+function renderPreviewMesh(meshData) {
+    clearPreviewGeometry();
+
+    const faceMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4fc3f7,
+        roughness: 0.35,
+        metalness: 0.1,
+        transparent: true,
+        opacity: 0.45,
+        side: THREE.DoubleSide,
+        depthWrite: false
+    });
+
+    meshData.faces.forEach(face => {
+        if (!face.vertices.length || !face.indices.length) return;
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(face.vertices), 3));
+        geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(face.indices), 1));
+        geometry.computeVertexNormals();
+        STATE.three.previewGroup.add(new THREE.Mesh(geometry, faceMaterial.clone()));
+    });
+
+    meshData.edges.forEach(edge => {
+        if (!edge.vertices.length) return;
+        const points = [];
+        for (let i = 0; i < edge.vertices.length; i += 3) {
+            points.push(new THREE.Vector3(edge.vertices[i], edge.vertices[i + 1], edge.vertices[i + 2]));
+        }
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const material = new THREE.LineBasicMaterial({ color: 0x0288d1, transparent: true, opacity: 0.9 });
+        STATE.three.previewGroup.add(new THREE.Line(geometry, material));
+    });
 }
 
 function clearRenderedGeometry() {
@@ -2462,6 +2536,86 @@ function handleToolbarAction(action) {
     renderParameterForm(config);
 }
 
+// --- Parameter dialog live preview ---------------------------------------
+
+let previewDebounceTimer = null;
+let previewRunToken = 0;
+let previewInFlight = false;
+
+function setPreviewStatus(state, message) {
+    const box = document.getElementById('param-preview-status');
+    const text = document.getElementById('param-preview-text');
+    if (!box || !text) return;
+    box.classList.remove('is-error', 'is-ready');
+    if (state === 'error') box.classList.add('is-error');
+    if (state === 'ready') box.classList.add('is-ready');
+    text.textContent = message;
+}
+
+function readParameterValues() {
+    const vals = {};
+    document.getElementById('param-modal-fields')
+        .querySelectorAll('input, select')
+        .forEach(input => {
+            vals[input.name] = input.type === 'number' ? parseFloat(input.value) : input.value;
+        });
+    return vals;
+}
+
+function schedulePreview() {
+    clearTimeout(previewDebounceTimer);
+    setPreviewStatus('busy', 'Building preview…');
+    previewDebounceTimer = setTimeout(runParameterPreview, 350);
+}
+
+async function runParameterPreview() {
+    if (!currentToolbarAction || !STATE.pyodide) return;
+    const config = TOOLBAR_CONFIG[currentToolbarAction];
+    if (!config) return;
+
+    // Serialise preview runs: Pyodide is single-threaded and typing can easily
+    // outpace OCCT. Newer requests supersede older ones via the token.
+    const token = ++previewRunToken;
+    if (previewInFlight) return;
+
+    const vals = readParameterValues();
+    if (Object.values(vals).some(v => typeof v === 'number' && Number.isNaN(v))) {
+        setPreviewStatus('error', 'Enter a value in every field.');
+        clearPreviewGeometry();
+        return;
+    }
+
+    let script;
+    try {
+        script = previewScriptFor(config.generator(vals));
+    } catch (e) {
+        setPreviewStatus('error', 'Could not build preview code.');
+        return;
+    }
+
+    previewInFlight = true;
+    try {
+        const result = await runPythonCode(script, { preview: true, skipSnapshot: true });
+        if (token !== previewRunToken) return; // superseded while running
+        if (result && result.ok) {
+            const faces = result.mesh.faces.length;
+            const edges = result.mesh.edges.length;
+            setPreviewStatus('ready', `Preview ready — ${faces} face${faces === 1 ? '' : 's'}, ${edges} edge${edges === 1 ? '' : 's'}.`);
+        } else {
+            setPreviewStatus('error', shortenPreviewError(result && result.error));
+        }
+    } finally {
+        previewInFlight = false;
+        if (token !== previewRunToken) runParameterPreview(); // run the latest values
+    }
+}
+
+function shortenPreviewError(message) {
+    if (!message) return 'Preview unavailable for these values.';
+    const first = String(message).split('\n')[0];
+    return first.length > 90 ? first.slice(0, 90) + '…' : first;
+}
+
 function renderParameterForm(config) {
     const titleEl = document.getElementById('param-modal-title');
     titleEl.innerHTML = `<i class="fa-solid fa-sliders text-accent"></i> ${config.title}`;
@@ -2499,10 +2653,20 @@ function renderParameterForm(config) {
         container.appendChild(group);
     });
 
+    // Live-preview on every edit so the user sees the shape before committing.
+    container.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('input', schedulePreview);
+        el.addEventListener('change', schedulePreview);
+    });
+
     document.getElementById('parameter-modal').classList.remove('hidden');
+    schedulePreview();
 }
 
 function closeParameterModal() {
+    clearTimeout(previewDebounceTimer);
+    previewRunToken++;              // invalidate any in-flight preview
+    clearPreviewGeometry();
     document.getElementById('parameter-modal').classList.add('hidden');
     currentToolbarAction = null;
 }
@@ -2513,22 +2677,9 @@ function applyParameterModal() {
     const config = TOOLBAR_CONFIG[currentToolbarAction];
     if (!config) return;
 
-    const vals = {};
-    const container = document.getElementById('param-modal-fields');
-    const inputs = container.querySelectorAll('input, select');
-    inputs.forEach(input => {
-        const val = input.value;
-        const name = input.name;
-        if (input.type === 'number') {
-            vals[name] = parseFloat(val);
-        } else {
-            vals[name] = val;
-        }
-    });
-
-    const code = config.generator(vals);
+    const code = config.generator(readParameterValues());
+    closeParameterModal();       // drops the ghost before committing the real geometry
     insertCodeAtCursor(code);
-    closeParameterModal();
 }
 
 const SKETCH_SNIPPET_RE = /^(Line|ThreePointArc|Rectangle|RectangleRounded|Circle|Bezier|RegularPolygon)\s*\(/;
@@ -2579,19 +2730,12 @@ function findBuilderBlockInsertion(model, headRe) {
     };
 }
 
-function insertCodeAtCursor(text) {
-    snapshotCurrentScript('insert toolbar snippet');
-
+// Works out where a toolbar snippet should go and what text to write, WITHOUT
+// modifying the editor. Returning the edit separately lets the parameter dialog
+// render a live preview of the exact script that Apply would produce.
+function computeToolbarEdit(text) {
     const isBlockStart = text.trim().endsWith(':');
-
-    if (!STATE.editor) {
-        const fallback = isBlockStart ? text + '\n    pass' : text;
-        STATE.currentScript = (STATE.currentScript || '') + '\n' + fallback;
-        if (!isBlockStart) {
-            runPythonCode(STATE.currentScript);
-        }
-        return;
-    }
+    if (!STATE.editor) return null;
 
     const selection = STATE.editor.getSelection();
     const model = STATE.editor.getModel();
@@ -2650,6 +2794,12 @@ function insertCodeAtCursor(text) {
             // script): append a self-contained block that merges any existing
             // geometry and reassigns the variable the renderer displays.
             const scriptText = model.getValue();
+            // A fresh session starts from a comment-only template with no import,
+            // so a self-contained block must bring its own or it fails with
+            // "name 'BuildPart' is not defined".
+            const importPrefix = /^\s*(from\s+build123d\s+import|import\s+build123d)/m.test(scriptText)
+                ? ''
+                : '\nfrom build123d import *\n';
             let block;
             if (kind === 'sketch') {
                 const hasSketch = /^sketch\s*=/m.test(scriptText);
@@ -2668,17 +2818,53 @@ function insertCodeAtCursor(text) {
             }
             const lastLine = model.getLineCount();
             range = new monaco.Range(lastLine, model.getLineMaxColumn(lastLine), lastLine, model.getLineMaxColumn(lastLine));
-            insertionText = block;
+            insertionText = importPrefix + block;
         }
     }
 
-    const op = {
+    return { range, insertionText, isBlockStart };
+}
+
+// The full script text that applying this snippet would produce. Uses a throwaway
+// Monaco model so the real editor is untouched.
+function previewScriptFor(text) {
+    const edit = computeToolbarEdit(text);
+    if (!edit) {
+        const isBlockStart = text.trim().endsWith(':');
+        const fallback = isBlockStart ? text + '\n    pass' : text;
+        return (STATE.currentScript || '') + '\n' + fallback;
+    }
+
+    const scratch = monaco.editor.createModel(STATE.editor.getValue(), 'python');
+    try {
+        scratch.applyEdits([{ range: edit.range, text: edit.insertionText }]);
+        return scratch.getValue();
+    } finally {
+        scratch.dispose();
+    }
+}
+
+function insertCodeAtCursor(text) {
+    snapshotCurrentScript('insert toolbar snippet');
+
+    const isBlockStart = text.trim().endsWith(':');
+
+    if (!STATE.editor) {
+        const fallback = isBlockStart ? text + '\n    pass' : text;
+        STATE.currentScript = (STATE.currentScript || '') + '\n' + fallback;
+        if (!isBlockStart) {
+            runPythonCode(STATE.currentScript);
+        }
+        return;
+    }
+
+    const edit = computeToolbarEdit(text);
+    STATE.editor.executeEdits("toolbar", [{
         identifier: { major: 1, minor: 1 },
-        range: range,
-        text: insertionText,
+        range: edit.range,
+        text: edit.insertionText,
         forceMoveMarkers: true
-    };
-    STATE.editor.executeEdits("toolbar", [op]);
+    }]);
 
     const currentScript = STATE.editor.getValue();
     STATE.currentScript = currentScript;
