@@ -139,7 +139,7 @@ Raycaster 點擊 → 高亮 + 注入 prompt context
 ## 🚀 快速開始
 
 ```bash
-git clone https://github.com/<your-account>/text-to-cad-studio.git
+git clone https://github.com/drogertieni/text-to-cad-studio.git
 cd text-to-cad-studio
 npm install
 npm run dev
