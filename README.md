@@ -2,7 +2,9 @@
 
 **English** · [繁體中文](README.zh-TW.md)
 
-> A parametric CAD workstation that runs entirely in your browser: describe a part in plain language → an LLM writes `build123d` Python → Pyodide (WebAssembly) compiles it → Three.js renders it, with STEP / DXF export.
+> A parametric CAD workstation that runs entirely in your browser — and unlike one-shot text-to-CAD generators, **you can click a face or edge on the generated model and tell it what to change.**
+>
+> Describe a part in plain language (or import a STEP / DXF), an LLM writes `build123d` Python, Pyodide (WebAssembly) compiles it, Three.js renders it, and every face and edge is individually clickable. Export to STEP / DXF.
 >
 > **No backend, no server.** Every geometry operation happens inside your browser tab, and your API key never leaves `localStorage`.
 
@@ -18,9 +20,36 @@ Bring your own API key (or point it at a local Ollama / LM Studio) and start mod
 
 ---
 
+## 💡 The core idea: point at the geometry, then talk to it
+
+Most text-to-CAD tools are one-shot. You write a prompt, you get a model, and if something is wrong your only option is to rewrite the whole prompt and hope. **This project closes the loop.**
+
+1. Describe a part — or import an existing STEP / DXF file.
+2. **Click a face or an edge in the 3D viewport.** It highlights in gold.
+3. Say what should happen *to that specific feature*:
+   *"fillet this edge 3 mm"* · *"drill a 5 mm hole through this face"* · *"extend this face outward 10 mm"*
+4. The click is silently translated into geometry the model can reason about, and appended to your prompt:
+
+   ```
+   Selected topological face 'Face_348' at center (16.540, 25.000, 16.540);
+   normal vector (1.000, 0.000, 0.000);
+   axis-aligned bbox min (16.540, 16.670, 8.330) max (16.540, 33.330, 24.990),
+   size 0.000 x 16.670 x 16.670 mm; area 277.890 mm²
+   ```
+
+5. The regenerated `build123d` script recompiles in-browser and the viewport updates. Undo is one click away if you dislike the result.
+
+**You never have to describe *which* face in words — you point at it.** That is the whole thesis of the project, and it is also where the hard problems live (see the next section).
+
+To make this work, the Python side tessellates every face *individually* and the JS side builds a separate `THREE.Mesh` per face with the feature metadata attached to `userData`, so the raycaster can tell one face from another.
+
+---
+
 ## ⚠️ Where This Is Stuck (read this first)
 
-**The project works, but "click a feature and modify it with words" is not reliable yet.** That is the heart of the project and the hardest part, and it remains unsolved. If you plan to fork or contribute, this section is the main battleground.
+The loop described above **does work** — on a simple part you can click a face, ask for a hole or a fillet, and get it. But it degrades badly as soon as geometry gets repetitive or you chain several edits together, and **a selection cannot survive a recompile at all.** That gap between "demos nicely" and "actually usable" is the hardest problem here, and it is unsolved.
+
+If you plan to contribute, this section is the main battleground.
 
 ### The root cause: the Topological Naming Problem
 

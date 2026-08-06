@@ -1,7 +1,7 @@
 {
   "name": "text-to-cad-web",
   "version": "1.0.0",
-  "description": "Browser-native parametric CAD: natural language -> build123d -> Pyodide (WASM) -> STEP/DXF. No backend.",
+  "description": "Browser-native parametric CAD. Click a face or edge on the generated model and change it with a sentence. build123d + Pyodide (WASM) + Three.js, no backend.",
   "keywords": [
     "cad",
     "build123d",
