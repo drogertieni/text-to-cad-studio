@@ -2682,12 +2682,17 @@ function applyParameterModal() {
     insertCodeAtCursor(code);
 }
 
-const SKETCH_SNIPPET_RE = /^(Line|ThreePointArc|Rectangle|RectangleRounded|Circle|Bezier|RegularPolygon)\s*\(/;
-const PART_SNIPPET_RE = /^(Box|extrude|sweep|revolve|section|split)\s*\(/;
+// Curve objects belong to a BuildLine context. Putting them in BuildSketch fails
+// with "Unable to repositioned type <class 'NoneType'>", which is what made the
+// Line/Arc/Bezier tools look broken.
+const LINE_SNIPPET_RE = /^(Line|Polyline|ThreePointArc|RadiusArc|CenterArc|TangentArc|JernArc|Bezier|Spline|EllipticalCenterArc|Helix)\s*\(/;
+const SKETCH_SNIPPET_RE = /^(Rectangle|RectangleRounded|Circle|Ellipse|RegularPolygon|Polygon|Trapezoid|SlotOverall|SlotCenterToCenter|Text)\s*\(/;
+const PART_SNIPPET_RE = /^(Box|Cylinder|Sphere|Cone|Torus|extrude|sweep|revolve|loft|section|split)\s*\(/;
 const BUILDER_SNIPPET_RE = /^(offset|mirror|fillet|chamfer)\s*\(/;
 
 function classifyToolbarSnippet(text) {
     const firstCodeLine = text.split('\n').map(l => l.trim()).find(l => l && !l.startsWith('#')) || '';
+    if (LINE_SNIPPET_RE.test(firstCodeLine)) return 'line';
     if (SKETCH_SNIPPET_RE.test(firstCodeLine)) return 'sketch';
     if (PART_SNIPPET_RE.test(firstCodeLine)) return 'part';
     if (BUILDER_SNIPPET_RE.test(firstCodeLine)) return 'builder';
@@ -2772,7 +2777,10 @@ function computeToolbarEdit(text) {
         // Cursor is at top level (typical when clicking toolbar buttons from
         // the 3D viewport): place the snippet where it can actually execute.
         const kind = classifyToolbarSnippet(text);
-        const headRe = kind === 'sketch' ? /^\s*with\s+BuildSketch\b.*:\s*$/
+        // Curve snippets target an existing BuildLine block so repeated Line/Arc
+        // clicks accumulate into one polyline, which is what drawing tools imply.
+        const headRe = kind === 'line' ? /^\s*with\s+BuildLine\b.*:\s*$/
+            : kind === 'sketch' ? /^\s*with\s+BuildSketch\b.*:\s*$/
             : kind === 'part' ? /^\s*with\s+BuildPart\b.*:\s*$/
             : kind === 'builder' ? /^\s*with\s+Build(Sketch|Part|Line)\b.*:\s*$/
             : null;
@@ -2801,7 +2809,12 @@ function computeToolbarEdit(text) {
                 ? ''
                 : '\nfrom build123d import *\n';
             let block;
-            if (kind === 'sketch') {
+            if (kind === 'line') {
+                // BuildLine yields a Curve/Wire; the renderer draws it as edges.
+                block = '\nwith BuildLine() as toolbar_builder:\n'
+                    + `    ${text.replace(/\n/g, '\n    ')}\n`
+                    + 'sketch = toolbar_builder.line\n';
+            } else if (kind === 'sketch') {
                 const hasSketch = /^sketch\s*=/m.test(scriptText);
                 block = '\nwith BuildSketch(Plane.XY) as toolbar_builder:\n'
                     + (hasSketch ? '    add(sketch)\n' : '')
