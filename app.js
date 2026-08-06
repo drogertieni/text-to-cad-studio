@@ -97,29 +97,46 @@ function normalizeAIConfig(rawConfig = {}, options = {}) {
 }
 
 // Default scripts to start with
+// Starter templates are intentionally comment-only: the app opens with an empty
+// viewport, so nothing is modelled until the user actually asks for something.
 const DEFAULT_SCRIPTS = {
-    '3d': `# Simple bracket with rounded corners and a center hole
-from build123d import *
-
-with BuildPart() as part:
-    Box(100, 50, 10)
-    # Subtraction
-    with BuildSketch(part.faces().sort_by(Axis.Z)[-1]) as sketch:
-        Circle(10)
-    extrude(amount=-10, mode=Mode.SUBTRACT)
-
-part = part.part
+    '3d': `# 3D mode — describe a part in the chat, or write build123d code here.
+# Assign the finished solid to a variable named 'part'.
+#
+# from build123d import *
+#
+# with BuildPart() as bp:
+#     Box(100, 50, 10)
+#     with BuildSketch(bp.faces().sort_by(Axis.Z)[-1]) as sk:
+#         Circle(10)
+#     extrude(amount=-10, mode=Mode.SUBTRACT)
+#
+# part = bp.part
 `,
-    '2d': `# Simple 2D flat plate outline
-from build123d import *
-
-with BuildSketch() as sketch:
-    RectangleRounded(80, 40, 5)
-    Circle(6, mode=Mode.SUBTRACT)
-
-sketch = sketch.sketch
+    '2d': `# 2D mode — describe a profile in the chat, or write build123d code here.
+# Assign the finished sketch to a variable named 'sketch'.
+#
+# from build123d import *
+#
+# with BuildSketch() as sk:
+#     RectangleRounded(80, 40, 5)
+#     Circle(6, mode=Mode.SUBTRACT)
+#
+# sketch = sk.sketch
 `
 };
+
+// True when a script contains nothing but blank lines and comments. Running one
+// of these should quietly leave an empty viewport rather than raising
+// "variable 'part' was not found".
+function isEffectivelyEmptyScript(script) {
+    return !(script || '')
+        .split('\n')
+        .some(line => {
+            const trimmed = line.trim();
+            return trimmed !== '' && !trimmed.startsWith('#');
+        });
+}
 
 // How many times the assistant may automatically re-send a compilation error
 // back to the model before giving up and showing it to the user.
@@ -943,10 +960,10 @@ await micropip.install(["build123d", "sqlite3"])
         // Remove loading overlay
         document.getElementById('loading-overlay').style.display = 'none';
         appendConsoleLog("Pyodide Kernel and build123d successfully loaded!\n");
-        
-        // Run the default script on load
-        runPythonCode(DEFAULT_SCRIPTS['3d']);
-        
+        appendConsoleLog("Viewport is empty. Describe a part, pick a benchmark, or import a STEP/DXF file to begin.\n");
+        // Deliberately no auto-run: the user starts from an empty viewport rather
+        // than a placeholder part they did not ask for.
+
     } catch (e) {
         console.error(e);
         updateLoader("Initialization Error", "Failed to start Pyodide. Check console for details.", 0);
@@ -965,7 +982,16 @@ async function runPythonCode(pythonScript, options = {}) {
         appendConsoleLog("Cannot run code: Pyodide is not initialized yet.\n");
         return;
     }
-    
+
+    // A comment-only starter template is not an error — just show an empty viewport.
+    if (isEffectivelyEmptyScript(pythonScript)) {
+        clearRenderedGeometry();
+        STATE.lastError = null;
+        appendConsoleLog("----------------------------------------\n");
+        appendConsoleLog("Script is empty — nothing to build. Viewport cleared.\n");
+        return true;
+    }
+
     appendConsoleLog("----------------------------------------\n");
     appendConsoleLog("Compiling shape...\n");
     
