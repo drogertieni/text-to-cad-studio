@@ -18,6 +18,10 @@
 
 Bring your own API key (or point it at a local Ollama / LM Studio) and start modeling. Nothing is installed, nothing is uploaded, and no Python or OpenCASCADE toolchain is needed on your machine.
 
+![Text-to-CAD Studio in action](assets/demo.gif)
+
+*Every parameter dialog previews live in the viewport before you commit. Click an edge and it reports its endpoints, which the next tool then snaps to — here the second block picks up its position straight from the selection.*
+
 ---
 
 ## 💡 The core idea: point at the geometry, then talk to it
