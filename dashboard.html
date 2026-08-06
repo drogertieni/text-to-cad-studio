@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Usage Dashboard - Text-to-CAD Studio</title>
+    
+    <!-- Modern Typography & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Chart.js for Visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <link rel="stylesheet" href="index.css">
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+    <!-- App Header -->
+    <header class="app-header">
+        <div class="header-logo">
+            <i class="fa-solid fa-chart-line logo-icon"></i>
+            <div class="logo-text">
+                <h1>Usage Dashboard</h1>
+                <span class="sub-text">Index & Shipping Metrics</span>
+            </div>
+        </div>
+        
+        <div class="header-controls">
+            <a href="index.html" class="primary-btn" style="text-decoration: none;">
+                <i class="fa-solid fa-cube"></i> Back to Studio
+            </a>
+        </div>
+    </header>
+
+    <main class="dashboard-main">
+        <!-- Summary Cards -->
+        <section class="summary-cards">
+            <div class="card-glass summary-card">
+                <div class="card-icon"><i class="fa-solid fa-magnifying-glass"></i></div>
+                <div class="card-content">
+                    <h3>Current Month Index</h3>
+                    <div class="card-value" id="summary-index">-</div>
+                </div>
+            </div>
+            <div class="card-glass summary-card">
+                <div class="card-icon"><i class="fa-solid fa-truck-fast"></i></div>
+                <div class="card-content">
+                    <h3>Current Month Shipping</h3>
+                    <div class="card-value" id="summary-shipping">-</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Content Area -->
+        <div class="dashboard-content">
+            <!-- Left Column: Chart -->
+            <section class="chart-section card-glass">
+                <div class="section-header">
+                    <h2><i class="fa-solid fa-chart-area"></i> Usage Trend</h2>
+                </div>
+                <div class="chart-container">
+                    <canvas id="usageChart"></canvas>
+                </div>
+            </section>
+
+            <!-- Right Column: Data Entry & Table -->
+            <section class="data-section card-glass">
+                <div class="section-header">
+                    <h2><i class="fa-solid fa-database"></i> Manage Data</h2>
+                </div>
+                
+                <!-- Data Form -->
+                <form id="data-form" class="data-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="month-input">Month</label>
+                            <input type="month" id="month-input" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="index-input">Index Usage</label>
+                            <input type="number" id="index-input" min="0" required placeholder="e.g. 150">
+                        </div>
+                        <div class="form-group">
+                            <label for="shipping-input">Shipping Usage</label>
+                            <input type="number" id="shipping-input" min="0" required placeholder="e.g. 320">
+                        </div>
+                    </div>
+                    <button type="submit" class="primary-btn submit-btn"><i class="fa-solid fa-floppy-disk"></i> Save Record</button>
+                </form>
+
+                <hr class="divider">
+
+                <!-- Data Table -->
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Month</th>
+                                <th>Index</th>
+                                <th>Shipping</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="data-table-body">
+                            <!-- Rows rendered by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- App Main Script -->
+    <script src="dashboard.js"></script>
+</body>
+</html>

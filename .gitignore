@@ -1,0 +1,42 @@
+# === 敏感資訊 / Secrets ===
+# API Key 一律只存在瀏覽器 localStorage，不應出現在任何檔案中。
+# 以下規則為額外保險。
+.env
+.env.*
+*.key
+*.pem
+secrets.json
+config.local.json
+**/apikey*
+**/api_key*
+
+# === 上游專案副本 (56MB，請自行 clone) ===
+# https://github.com/earthtojake/text-to-cad
+text-to-cad/
+
+# === 依賴與快取 ===
+node_modules/
+__pycache__/
+*.py[cod]
+.pyodide-cache/
+
+# === 本機 AI Agent 工具設定 ===
+.claude/settings.local.json
+.opencode/
+.codex/
+.qwen/
+.aionrs/
+
+# === 產出物 ===
+model.step
+model.stp
+model.dxf
+*.stl
+*.3mf
+
+# === 編輯器 / OS ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

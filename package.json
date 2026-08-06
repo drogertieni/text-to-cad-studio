@@ -1,0 +1,13 @@
+{
+  "name": "text-to-cad-web",
+  "version": "1.0.0",
+  "description": "Graphical Text-to-CAD application running build123d client-side.",
+  "main": "index.html",
+  "scripts": {
+    "dev": "npx http-server -p 8000"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}

@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parametric Text-to-CAD Studio</title>
+    
+    <!-- Modern Typography & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- External Dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.29.4/full/pyodide.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
+    
+    <link rel="stylesheet" href="index.css?v=20260702a">
+</head>
+<body>
+    <!-- App Header -->
+    <header class="app-header">
+        <div class="header-logo">
+            <i class="fa-solid fa-cubes logo-icon"></i>
+            <div class="logo-text">
+                <h1>Text-to-CAD Studio</h1>
+                <span class="sub-text">Parametric Wasm Engine</span>
+            </div>
+        </div>
+        
+        <div class="header-controls">
+            <!-- Engine Status Indicators -->
+            <div class="status-indicator-group">
+                <div class="status-item" id="status-pyodide">
+                    <span class="status-dot red"></span>
+                    <span class="status-label">Pyodide Kernel</span>
+                </div>
+                <div class="status-item" id="status-ai">
+                    <span class="status-dot red"></span>
+                    <span class="status-label">AI Engine</span>
+                </div>
+                <div class="status-item" id="status-cad-skills">
+                    <span class="status-dot green"></span>
+                    <span class="status-label">CAD Skills</span>
+                </div>
+            </div>
+            <a href="dashboard.html" class="icon-btn" title="Usage Dashboard" style="text-decoration: none;">
+                <i class="fa-solid fa-chart-line"></i>
+            </a>
+            <button class="icon-btn" id="open-settings-btn" title="AI Settings">
+                <i class="fa-solid fa-gear"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- CAD Toolbar -->
+    <div class="cad-toolbar" id="cad-toolbar">
+        <div class="toolbar-group" data-group="drawing">
+            <div class="group-items">
+                <button class="toolbar-btn" data-action="line" title="Line"><i class="fa-solid fa-slash"></i><span>Line</span></button>
+                <button class="toolbar-btn" data-action="arc" title="Arc"><i class="fa-solid fa-circle-notch"></i><span>Arc</span></button>
+                <button class="toolbar-btn" data-action="rectangle" title="Rectangle"><i class="fa-regular fa-square"></i><span>Rectangle</span></button>
+                <button class="toolbar-btn" data-action="circle" title="Circle"><i class="fa-regular fa-circle"></i><span>Circle</span></button>
+                <button class="toolbar-btn" data-action="bezier" title="Bezier"><i class="fa-solid fa-bezier-curve"></i><span>Bezier</span></button>
+                <button class="toolbar-btn" data-action="polygon" title="Polygon"><i class="fa-solid fa-draw-polygon"></i><span>Polygon</span></button>
+                <button class="toolbar-btn" data-action="box" title="Box"><i class="fa-solid fa-cube"></i><span>Box</span></button>
+                <button class="toolbar-btn" data-action="thick-solid" title="Thick Solid"><i class="fa-solid fa-layer-group"></i><span>Thick Solid</span></button>
+            </div>
+            <div class="group-label">Drawing</div>
+        </div>
+        <div class="toolbar-group" data-group="modify">
+            <div class="group-items">
+                <button class="toolbar-btn" data-action="move" title="Move"><i class="fa-solid fa-arrows-up-down-left-right"></i><span>Move</span></button>
+                <button class="toolbar-btn" data-action="rotate" title="Rotate"><i class="fa-solid fa-arrows-spin"></i><span>Rotate</span></button>
+                <button class="toolbar-btn" data-action="mirror" title="Mirror"><i class="fa-solid fa-arrows-left-right"></i><span>Mirror</span></button>
+                <button class="toolbar-btn" data-action="offset" title="Offset"><i class="fa-solid fa-compress"></i><span>Offset</span></button>
+                <button class="toolbar-btn" data-action="delete" title="Delete"><i class="fa-solid fa-trash-can"></i><span>Delete</span></button>
+                <button class="toolbar-btn" data-action="break" title="Break"><i class="fa-solid fa-link-slash"></i><span>Break</span></button>
+                <button class="toolbar-btn" data-action="trim" title="Trim"><i class="fa-solid fa-scissors"></i><span>Trim</span></button>
+            </div>
+            <div class="group-label">Modify</div>
+        </div>
+        <div class="toolbar-group" data-group="converter">
+            <div class="group-items">
+                <button class="toolbar-btn" data-action="to-wire" title="To Wire"><i class="fa-solid fa-route"></i><span>To Wire</span></button>
+                <button class="toolbar-btn" data-action="to-face" title="To Face"><i class="fa-solid fa-square-full"></i><span>To Face</span></button>
+                <button class="toolbar-btn" data-action="prism" title="Prism"><i class="fa-solid fa-cubes"></i><span>Prism</span></button>
+                <button class="toolbar-btn" data-action="sweep" title="Sweep"><i class="fa-solid fa-road"></i><span>Sweep</span></button>
+                <button class="toolbar-btn" data-action="revol" title="Revol"><i class="fa-solid fa-circle-nodes"></i><span>Revol</span></button>
+            </div>
+            <div class="group-label">Converter</div>
+        </div>
+        <div class="toolbar-group" data-group="boolean">
+            <div class="group-items">
+                <button class="toolbar-btn" data-action="common" title="Common"><i class="fa-solid fa-square-minus fa-rotate-90"></i><span>Common</span></button>
+                <button class="toolbar-btn" data-action="cut" title="Cut"><i class="fa-solid fa-square-minus"></i><span>Cut</span></button>
+                <button class="toolbar-btn" data-action="fuse" title="Fuse"><i class="fa-solid fa-square-plus"></i><span>Fuse</span></button>
+            </div>
+            <div class="group-label">Boolean</div>
+        </div>
+        <div class="toolbar-group" data-group="working-plane">
+            <div class="group-items">
+                <button class="toolbar-btn" data-action="set-workplane" title="Set workplane"><i class="fa-solid fa-border-all"></i><span>Set workplane</span></button>
+                <button class="toolbar-btn" data-action="align-to-plane" title="Align to plane"><i class="fa-solid fa-table-cells"></i><span>Align to plane</span></button>
+            </div>
+            <div class="group-label">Working Plane</div>
+        </div>
+        <div class="toolbar-group" data-group="tools">
+            <div class="group-items">
+                <button class="toolbar-btn" data-action="section" title="Section"><i class="fa-solid fa-circle-half-stroke"></i><span>Section</span></button>
+                <button class="toolbar-btn" data-action="split" title="Split"><i class="fa-solid fa-grip-lines-vertical"></i><span>Split</span></button>
+            </div>
+            <div class="group-label">Tools</div>
+        </div>
+        <div class="toolbar-group" data-group="import-export">
+            <div class="group-items">
+                <button class="toolbar-btn" data-action="import" title="Import"><i class="fa-solid fa-file-import"></i><span>Import</span></button>
+                <button class="toolbar-btn" data-action="export" title="Export"><i class="fa-solid fa-file-export"></i><span>Export</span></button>
+            </div>
+            <div class="group-label">Import/Export</div>
+        </div>
+    </div>
+
+    <!-- Main Split Screen Workspace -->
+    <main class="main-workspace">
+        <!-- Left Side: Chat Assistant -->
+        <section class="sidebar-panel">
+            <div class="panel-header">
+                <h2><i class="fa-solid fa-comment-dots text-accent"></i> Design Assistant</h2>
+                <div class="panel-header-actions">
+                    <button class="text-btn" id="undo-btn" disabled title="Nothing to undo">
+                        <i class="fa-solid fa-rotate-left"></i> Undo
+                    </button>
+                    <button class="text-btn clear-chat-btn" id="clear-chat-btn">
+                        <i class="fa-solid fa-trash-can"></i> Clear
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Chat Logs -->
+            <div class="chat-console" id="chat-console">
+                <div class="chat-message system">
+                    <div class="message-content">
+                        Hello, I am droger's Parametric CAD Assistant! Describe the part you want to design, and I will generate the build123d Python script. You can click on the 3D model features to select and reference them for follow-up operations.
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Selected Feature References -->
+            <div class="selected-features-box hidden" id="selected-features-box">
+                <div class="feature-info">
+                    <span class="feature-badge"><i class="fa-solid fa-tag"></i> <span id="feature-id-label">Face_0</span></span>
+                    <span class="feature-coord">Center: <span id="feature-coord-label">(0.00, 0.00, 0.00)</span></span>
+                </div>
+                <button class="clear-feature-btn" id="clear-feature-btn" title="Clear selection">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Prompt Inputs -->
+            <div class="prompt-input-area">
+                <div class="benchmark-picker">
+                    <label for="benchmark-select"><i class="fa-solid fa-layer-group"></i> CAD Skills 範例題庫</label>
+                    <select id="benchmark-select">
+                        <option value="">選擇一個 text-to-cad 範例提示...</option>
+                    </select>
+                </div>
+                <textarea id="prompt-input" placeholder="e.g. Create an aluminum bar of dimensions 100x50x5 mm with rounded corners..."></textarea>
+                <div class="input-actions">
+                    <div class="prompt-suggestions" id="prompt-suggestions">
+                        <button class="suggest-btn" data-prompt="Create an aluminum bar of dimensions 100x50x5 mm with corner radius 5mm, and a center hole of diameter 10mm.">Aluminum Bar</button>
+                        <button class="suggest-btn" data-prompt="Create a simple hex nut with 12mm flat-to-flat width, 6mm thickness, and a 6mm threaded hole.">Hex Nut</button>
+                        <button class="suggest-btn" data-prompt="Make a mounting bracket L-shape with 40x40 width, 3mm thickness, and 4 holes.">L-Bracket</button>
+                    </div>
+                    
+                    <button class="send-btn" id="send-prompt-btn">
+                        <span>Generate</span>
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Side: Workspace Viewports -->
+        <section class="main-viewport-panel">
+            <!-- Navigation Tabs -->
+            <div class="tab-header">
+                <button class="tab-btn active" data-tab="tab-3d">
+                    <i class="fa-solid fa-cube"></i> 3D Viewport
+                </button>
+                <button class="tab-btn" data-tab="tab-code">
+                    <i class="fa-solid fa-code"></i> Python Script
+                </button>
+                <button class="tab-btn" data-tab="tab-console">
+                    <i class="fa-solid fa-terminal"></i> Console Logs
+                </button>
+            </div>
+            
+            <!-- Tab Contents -->
+            <div class="tab-content-container">
+                <!-- 3D Preview Tab -->
+                <div class="tab-content active" id="tab-3d">
+                    <div class="viewport-canvas-wrapper" id="canvas-container">
+                        <!-- Canvas overlay buttons -->
+                        <div class="canvas-toolbar">
+                            <button class="tool-btn" id="view-reset-btn" title="Reset Camera"><i class="fa-solid fa-arrows-to-eye"></i></button>
+                            <button class="tool-btn" id="view-grid-btn" title="Toggle Grid"><i class="fa-solid fa-border-all"></i></button>
+                            <div class="divider"></div>
+                            
+                            <!-- 2D / 3D Mode Selector -->
+                            <div class="toggle-group">
+                                <button class="toggle-option active" id="mode-3d-btn" title="3D Mode (STEP)">3D</button>
+                                <button class="toggle-option" id="mode-2d-btn" title="2D Mode (DXF)">2D</button>
+                            </div>
+                            
+                            <div class="divider"></div>
+                            <button class="import-btn" id="import-step-btn" title="Import STEP / STP File"><i class="fa-solid fa-upload"></i> Import STEP</button>
+                            <button class="import-btn" id="import-dxf-btn" title="Import DXF File"><i class="fa-solid fa-upload"></i> Import DXF</button>
+                            <button class="export-btn" id="export-step-btn" title="Download STEP File"><i class="fa-solid fa-download"></i> STEP</button>
+                            <button class="export-btn" id="export-dxf-btn" title="Download DXF File"><i class="fa-solid fa-download"></i> DXF</button>
+                        </div>
+                        <input type="file" id="import-step-input" class="hidden-file-input" accept=".step,.stp" />
+                        <input type="file" id="import-dxf-input" class="hidden-file-input" accept=".dxf" />
+                        
+                        <div class="instructions-overlay">
+                            <p><i class="fa-solid fa-circle-info"></i> Left click + Drag to rotate. Right click + Drag to pan. Scroll to zoom. Click face/edge to select, or import existing STEP/DXF files.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Code Editor Tab -->
+                <div class="tab-content" id="tab-code">
+                    <div class="code-editor-actions">
+                        <span class="editor-info"><i class="fa-brands fa-python python-icon"></i> build123d editor</span>
+                        <button class="run-code-btn" id="run-code-btn"><i class="fa-solid fa-play"></i> Run Code</button>
+                    </div>
+                    <div class="monaco-wrapper">
+                        <div id="code-editor"></div>
+                    </div>
+                </div>
+
+                <!-- Console Logs Tab -->
+                <div class="tab-content" id="tab-console">
+                    <pre class="console-log-area" id="console-logs">System initialized. Waiting for prompt...</pre>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Settings Modal -->
+    <div class="modal-backdrop hidden" id="settings-modal">
+        <div class="modal-content card-glass">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-sliders text-accent"></i> AI Inference Configuration</h3>
+                <button class="close-modal-btn" id="close-settings-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="provider-select">AI Model Provider</label>
+                    <select id="provider-select">
+                        <option value="openai">OpenAI (ChatGPT)</option>
+                        <option value="openrouter">OpenRouter</option>
+                        <option value="anthropic">Anthropic (Claude)</option>
+                        <option value="gemini">Google (Gemini)</option>
+                        <option value="local">Local Endpoint (Ollama / LM Studio)</option>
+                        <option value="custom">Custom (Self-hosted)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="api-key-group">
+                    <label for="api-key-input">API Key</label>
+                    <input type="password" id="api-key-input" placeholder="sk-..." />
+                    <span class="help-text">Your API Key is saved locally in your browser's localStorage.</span>
+                </div>
+
+                <div class="form-group" id="api-url-group">
+                    <label for="api-url-input">API Endpoint URL</label>
+                    <input type="text" id="api-url-input" placeholder="https://api.openai.com/v1" />
+                    <span class="help-text">For local, use e.g. http://localhost:11434/v1 (Ollama) or http://localhost:1234/v1 (LM Studio)</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="model-name-input">Model Name</label>
+                    <input type="text" id="model-name-input" placeholder="gpt-4o" />
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button class="secondary-btn" id="cancel-settings-btn">Cancel</button>
+                <button class="primary-btn" id="save-settings-btn">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Parameter Config Modal -->
+    <div class="modal-backdrop hidden" id="parameter-modal">
+        <div class="modal-content card-glass" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3 id="param-modal-title"><i class="fa-solid fa-sliders text-accent"></i> Configure Parameters</h3>
+                <button class="close-modal-btn" id="close-param-modal-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="modal-body" id="param-modal-fields">
+                <!-- Dynamic form fields will be injected here -->
+            </div>
+
+            <div class="modal-footer">
+                <button class="secondary-btn" id="cancel-param-modal-btn">Cancel</button>
+                <button class="primary-btn" id="apply-param-modal-btn">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pyodide Initialization Spinner Screen -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-container">
+            <i class="fa-solid fa-cubes loader-icon spinning"></i>
+            <h2 id="loader-title">Setting up Wasm CAD Kernel</h2>
+            <p id="loader-subtitle" class="loader-subtitle">Loading Pyodide environment...</p>
+            <div class="progress-bar">
+                <div class="progress-fill" id="loader-progress"></div>
+            </div>
+            <div class="loader-details" id="loader-details">
+                This may take up to 20-30 seconds on first load as OpenCascade's WASM engine is cached in your browser.
+            </div>
+        </div>
+    </div>
+
+    <!-- App Main Script -->
+    <script src="app.js?v=20260630b"></script>
+</body>
+</html>
