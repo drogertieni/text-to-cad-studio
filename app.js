@@ -1215,11 +1215,19 @@ def __wasm_run_and_tessellate(code_to_run, is_2d, target_info):
             return v
 
         target_var = "sketch" if is_2d else "part"
+        other_var = "part" if is_2d else "sketch"
         shape = None
 
-        candidate = local_scope.get(target_var)
-        if _is_geometry_instance(candidate):
-            shape = _unwrap_builder(candidate)
+        # Explicitly named results win over anything discovered by scanning. The
+        # other mode's name is tried second because a BuildLine drawing assigns
+        # 'sketch' even in 3D mode; without this the scan below could reach a
+        # leftover builder first and render pre-edit geometry (e.g. a deleted
+        # edge reappearing because toolbar_builder still held the original curve).
+        for name in (target_var, other_var):
+            candidate = local_scope.get(name)
+            if _is_geometry_instance(candidate):
+                shape = _unwrap_builder(candidate)
+                break
 
         if shape is None:
             # Fallback: scan for actual shape instances, skipping classes/modules
@@ -2235,6 +2243,15 @@ async function generateCAD(promptText) {
 // feature selected right now. Snippets must not emit a bare find_nearest_face(part):
 // that resolves against the live selection, so re-running the script after the user
 // clicks elsewhere would silently move the operation onto the new face.
+// Which variable the renderer is currently displaying. A BuildLine drawing
+// assigns `sketch` even in 3D mode, so trust the script over the mode toggle.
+function activeGeometryVariable() {
+    const src = (STATE.editor ? STATE.editor.getValue() : STATE.currentScript) || '';
+    if (/^\s*part\s*=/m.test(src)) return 'part';
+    if (/^\s*sketch\s*=/m.test(src)) return 'sketch';
+    return STATE.is2DMode ? 'sketch' : 'part';
+}
+
 function selectedFaceLookup(shapeVar = 'part') {
     const center = STATE.selectedFeature && STATE.selectedFeature.center;
     if (!center) return null;
@@ -2366,18 +2383,26 @@ const TOOLBAR_CONFIG = {
         generator: (vals) => `offset(amount=${vals.amount})`
     },
     delete: {
-        title: "Subtract Selection",
-        fields: [
-            { label: "Extrusion depth to subtract", name: "depth", type: "number", default: 10 }
-        ],
-        generator: (vals) => {
-            const lookup = STATE.selectedFeature && STATE.selectedFeature.type === 'face'
-                ? selectedFaceLookup()
-                : null;
-            if (lookup) {
-                return `# Subtracting selected face\nwith BuildSketch(${lookup}) as sketch:\n    # Inner geometry to subtract\n    pass\nextrude(amount=-${vals.depth}, mode=Mode.SUBTRACT)`;
+        title: "Delete Selected Feature",
+        // No fields: with a feature already picked there is nothing to configure,
+        // so Delete acts immediately the way it does in any CAD package.
+        fields: [],
+        generator: () => {
+            const feat = STATE.selectedFeature;
+            if (!feat) return null;
+
+            const target = activeGeometryVariable();
+            const coords = feat.center.map(n => n.toFixed(3)).join(', ');
+
+            if (feat.type === 'edge') {
+                return `# Delete ${feat.id} at (${coords})\n`
+                    + `_deleted_at = Vector(${coords})\n`
+                    + `${target} = Curve() + [e for e in ${target}.edges() if (e.center() - _deleted_at).length > 1e-3]`;
             }
-            return `# Define subtraction manually\nextrude(amount=-${vals.depth}, mode=Mode.SUBTRACT)`;
+
+            return `# Delete ${feat.id} at (${coords})\n`
+                + `_deleted_at = Vector(${coords})\n`
+                + `${target} = Sketch() + [f for f in ${target}.faces() if (f.center() - _deleted_at).length > 1e-3]`;
         }
     },
     break: {
@@ -2525,11 +2550,30 @@ function handleToolbarAction(action) {
     const config = TOOLBAR_CONFIG[action];
     if (!config) return;
 
+    if (action === 'delete') {
+        const feat = STATE.selectedFeature;
+        if (!feat) {
+            alert("Select an edge or face in the 3D viewport first, then click Delete.");
+            return;
+        }
+        // A face cannot simply be removed from a closed solid — that leaves an
+        // open shell. Boolean subtraction is the right tool for that.
+        if (feat.type === 'face' && activeGeometryVariable() === 'part') {
+            alert("Deleting a face from a solid would leave it open. Use the Cut tool to remove material instead.");
+            return;
+        }
+    }
+
     currentToolbarAction = action;
 
     if (!config.fields || config.fields.length === 0) {
         const code = config.generator({});
+        if (!code) {
+            currentToolbarAction = null;
+            return;
+        }
         insertCodeAtCursor(code);
+        currentToolbarAction = null;
         return;
     }
 
