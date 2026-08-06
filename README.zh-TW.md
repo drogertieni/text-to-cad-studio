@@ -6,9 +6,15 @@
 >
 > **無後端、無伺服器。** 所有幾何運算都在你的瀏覽器分頁內完成，API Key 只存在 `localStorage`。
 
+[![線上試用](https://img.shields.io/badge/▶_線上試用-立即開始-2ea44f?style=for-the-badge)](https://drogertieni.github.io/text-to-cad-studio/)
+
 ![status](https://img.shields.io/badge/status-experimental-orange)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![backend](https://img.shields.io/badge/backend-none-brightgreen)
+
+### 👉 [**直接在瀏覽器裡試用 — 免安裝**](https://drogertieni.github.io/text-to-cad-studio/)
+
+自備 API Key（或指向本機的 Ollama / LM Studio）即可開始建模。不需安裝任何東西、不會上傳任何資料，你的電腦也不需要 Python 或 OpenCASCADE 環境。
 
 ---
 
@@ -140,7 +146,13 @@ Raycaster 點擊 → 高亮 + 注入 prompt context
 
 ## 🚀 快速開始
 
-### 方式 A — 直接開檔（免安裝、免伺服器）
+### 方式 A — 線上版（完全免安裝）
+
+**<https://drogertieni.github.io/text-to-cad-studio/>**
+
+打開後點 ⚙️ 填入 API Key，就能開始描述零件。這就是 `main` 分支的同一份程式碼，由 GitHub Pages 以 HTTPS 提供。
+
+### 方式 B — 下載後直接開檔（免安裝、免伺服器）
 
 ```bash
 git clone https://github.com/drogertieni/text-to-cad-studio.git
@@ -150,7 +162,7 @@ git clone https://github.com/drogertieni/text-to-cad-studio.git
 
 真的就這樣。所有相依套件（Pyodide、build123d、Three.js、Monaco）都從 CDN 載入，而這些 CDN 都帶有 `Access-Control-Allow-Origin: *`；本專案又不讀取任何本機檔案，所以 `file://` 完全不受影響。已在 Chrome 以 `file:///…/index.html` 實測：Pyodide 與 build123d 正常載入、腳本正常編譯、`localStorage` 設定正常保存。
 
-### 方式 B — 本機 HTTP 伺服器
+### 方式 C — 本機 HTTP 伺服器
 
 ```bash
 cd text-to-cad-studio
@@ -160,9 +172,19 @@ npm run dev   # http://localhost:8000
 
 若你想要固定的 `localStorage` origin、要改原始碼搭配即時重載，或遇到下方的限制，就用這個方式。
 
-> **本地 LLM 在 `file://` 下的限制：** 從 `file://` 開啟的頁面送出的是 `Origin: null`，Ollama 與 LM Studio 預設會拒絕。**因此使用本地模型時必須用方式 B。** 以 Ollama 為例，改用 HTTP 伺服器即可解決；或者在 `ollama serve` 前設定 `OLLAMA_ORIGINS="*"`。雲端供應商（OpenAI、Gemini、Anthropic、OpenRouter）兩種方式都正常。
+> **本地 LLM 在 `file://` 下的限制：** 從 `file://` 開啟的頁面送出的是 `Origin: null`，Ollama 與 LM Studio 預設會拒絕。**因此使用本地模型時必須用方式 C。** 以 Ollama 為例，改用 HTTP 伺服器即可解決；或者在 `ollama serve` 前設定 `OLLAMA_ORIGINS="*"`。雲端供應商（OpenAI、Gemini、Anthropic、OpenRouter）兩種方式都正常。
 
-無論哪種方式，首次載入都需下載約 30MB 並花費 20–60 秒（OpenCASCADE 下載與快取），之後由瀏覽器快取。
+無論選哪一種，首次載入都需下載約 30MB 並花費 20–60 秒（下載 OpenCASCADE），之後由瀏覽器快取。
+
+### 部署自己的版本
+
+因為本專案是純靜態、無建置步驟，任何靜態主機都能部署。以 GitHub Pages 為例：
+
+1. Fork 或推送本專案到你的帳號
+2. **Settings → Pages → Source 選 `Deploy from a branch` → Branch 選 `main` / `(root)` → Save**
+3. 等待數分鐘完成首次建置，你的版本會出現在 `https://<帳號>.github.io/<repo>/`
+
+不需要 workflow 檔、不需要建置步驟、也不需要設定任何 secret —— API Key 由每位訪客在自己的瀏覽器中填入，所以公開部署絕不會夾帶你的憑證。
 
 ### 設定 AI
 

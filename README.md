@@ -6,9 +6,15 @@
 >
 > **No backend, no server.** Every geometry operation happens inside your browser tab, and your API key never leaves `localStorage`.
 
+[![Live Demo](https://img.shields.io/badge/▶_Live_Demo-try_it_now-2ea44f?style=for-the-badge)](https://drogertieni.github.io/text-to-cad-studio/)
+
 ![status](https://img.shields.io/badge/status-experimental-orange)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![backend](https://img.shields.io/badge/backend-none-brightgreen)
+
+### 👉 [**Try it in your browser — no install required**](https://drogertieni.github.io/text-to-cad-studio/)
+
+Bring your own API key (or point it at a local Ollama / LM Studio) and start modeling. Nothing is installed, nothing is uploaded, and no Python or OpenCASCADE toolchain is needed on your machine.
 
 ---
 
@@ -140,7 +146,13 @@ Raycaster click → highlight + inject prompt context
 
 ## 🚀 Quick Start
 
-### Option A — just open the file (no install, no server)
+### Option A — the hosted demo (nothing to install)
+
+**<https://drogertieni.github.io/text-to-cad-studio/>**
+
+Open it, click ⚙️, add an API key, and start describing parts. This is the same code as `main`, served over HTTPS by GitHub Pages.
+
+### Option B — just open the file locally (no install, no server)
 
 ```bash
 git clone https://github.com/drogertieni/text-to-cad-studio.git
@@ -150,7 +162,7 @@ Then double-click `index.html`, or drag it into your browser.
 
 That is genuinely all it takes. Every dependency (Pyodide, build123d, Three.js, Monaco) is fetched from CDNs that send `Access-Control-Allow-Origin: *`, and the app never reads a local file, so the `file://` origin is not a problem. Verified working in Chrome from `file:///…/index.html`: Pyodide and build123d load, scripts compile, and `localStorage` settings persist.
 
-### Option B — local HTTP server
+### Option C — local HTTP server
 
 ```bash
 cd text-to-cad-studio
@@ -160,9 +172,19 @@ npm run dev   # http://localhost:8000
 
 Worth it if you want a stable origin for `localStorage`, plan to edit the source with live reload, or hit the caveat below.
 
-> **Caveat for local LLMs on `file://`:** a page served from `file://` sends `Origin: null`. Ollama and LM Studio reject that by default, so **Option B is required if you use a local model.** For Ollama, serving over HTTP fixes it; alternatively set `OLLAMA_ORIGINS="*"` before `ollama serve`. Cloud providers (OpenAI, Gemini, Anthropic, OpenRouter) work fine either way.
+> **Caveat for local LLMs on `file://`:** a page served from `file://` sends `Origin: null`. Ollama and LM Studio reject that by default, so **Option C is required if you use a local model.** For Ollama, serving over HTTP fixes it; alternatively set `OLLAMA_ORIGINS="*"` before `ollama serve`. Cloud providers (OpenAI, Gemini, Anthropic, OpenRouter) work fine either way.
 
-Either way, the first load pulls ~30 MB and takes 20–60 seconds while OpenCASCADE is downloaded and cached.
+Whichever option you pick, the first load pulls ~30 MB and takes 20–60 seconds while OpenCASCADE is downloaded and cached by the browser.
+
+### Deploying your own copy
+
+Because the app is fully static with no build step, any static host works. For GitHub Pages:
+
+1. Fork or push this repo to your account.
+2. **Settings → Pages → Source: `Deploy from a branch` → Branch: `main` / `(root)` → Save.**
+3. Wait a few minutes for the first build; your copy appears at `https://<user>.github.io/<repo>/`.
+
+No workflow file, no build step, and no secrets to configure — API keys are supplied by each visitor in their own browser, so a public deployment never carries your credentials.
 
 ### Configuring the AI
 
