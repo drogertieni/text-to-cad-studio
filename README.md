@@ -140,16 +140,29 @@ Raycaster click → highlight + inject prompt context
 
 ## 🚀 Quick Start
 
+### Option A — just open the file (no install, no server)
+
 ```bash
 git clone https://github.com/drogertieni/text-to-cad-studio.git
-cd text-to-cad-studio
-npm install
-npm run dev
 ```
 
-Open <http://localhost:8000> and wait for Pyodide and build123d to finish loading (20–60 seconds on first run).
+Then double-click `index.html`, or drag it into your browser.
 
-> ⚠️ You must serve it over HTTP. Double-clicking `index.html` will fail to load Pyodide because of CORS.
+That is genuinely all it takes. Every dependency (Pyodide, build123d, Three.js, Monaco) is fetched from CDNs that send `Access-Control-Allow-Origin: *`, and the app never reads a local file, so the `file://` origin is not a problem. Verified working in Chrome from `file:///…/index.html`: Pyodide and build123d load, scripts compile, and `localStorage` settings persist.
+
+### Option B — local HTTP server
+
+```bash
+cd text-to-cad-studio
+npm install
+npm run dev   # http://localhost:8000
+```
+
+Worth it if you want a stable origin for `localStorage`, plan to edit the source with live reload, or hit the caveat below.
+
+> **Caveat for local LLMs on `file://`:** a page served from `file://` sends `Origin: null`. Ollama and LM Studio reject that by default, so **Option B is required if you use a local model.** For Ollama, serving over HTTP fixes it; alternatively set `OLLAMA_ORIGINS="*"` before `ollama serve`. Cloud providers (OpenAI, Gemini, Anthropic, OpenRouter) work fine either way.
+
+Either way, the first load pulls ~30 MB and takes 20–60 seconds while OpenCASCADE is downloaded and cached.
 
 ### Configuring the AI
 

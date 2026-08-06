@@ -140,16 +140,29 @@ Raycaster 點擊 → 高亮 + 注入 prompt context
 
 ## 🚀 快速開始
 
+### 方式 A — 直接開檔（免安裝、免伺服器）
+
 ```bash
 git clone https://github.com/drogertieni/text-to-cad-studio.git
-cd text-to-cad-studio
-npm install
-npm run dev
 ```
 
-開啟 <http://localhost:8000>，等待 Pyodide 與 build123d 載入完成（首次約 20–60 秒）。
+然後直接**雙擊 `index.html`**，或把它拖進瀏覽器即可。
 
-> ⚠️ 必須透過 HTTP 伺服器開啟，直接雙擊 `index.html` 會因為 CORS 而無法載入 Pyodide。
+真的就這樣。所有相依套件（Pyodide、build123d、Three.js、Monaco）都從 CDN 載入，而這些 CDN 都帶有 `Access-Control-Allow-Origin: *`；本專案又不讀取任何本機檔案，所以 `file://` 完全不受影響。已在 Chrome 以 `file:///…/index.html` 實測：Pyodide 與 build123d 正常載入、腳本正常編譯、`localStorage` 設定正常保存。
+
+### 方式 B — 本機 HTTP 伺服器
+
+```bash
+cd text-to-cad-studio
+npm install
+npm run dev   # http://localhost:8000
+```
+
+若你想要固定的 `localStorage` origin、要改原始碼搭配即時重載，或遇到下方的限制，就用這個方式。
+
+> **本地 LLM 在 `file://` 下的限制：** 從 `file://` 開啟的頁面送出的是 `Origin: null`，Ollama 與 LM Studio 預設會拒絕。**因此使用本地模型時必須用方式 B。** 以 Ollama 為例，改用 HTTP 伺服器即可解決；或者在 `ollama serve` 前設定 `OLLAMA_ORIGINS="*"`。雲端供應商（OpenAI、Gemini、Anthropic、OpenRouter）兩種方式都正常。
+
+無論哪種方式，首次載入都需下載約 30MB 並花費 20–60 秒（OpenCASCADE 下載與快取），之後由瀏覽器快取。
 
 ### 設定 AI
 
