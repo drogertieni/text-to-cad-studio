@@ -1066,8 +1066,62 @@ def __wasm_run_and_tessellate(code_to_run, is_2d, target_info):
                     return e
         return min(edges, key=lambda e: (e.center() - c).length)
 
+    def _safe_blend(shape, edge_list, size, op, label):
+        # A cosmetic fillet/chamfer must never destroy the whole model. OCCT's
+        # ChFi3d_Builder fails on plenty of valid-looking edge sets ("only 2 faces",
+        # "Failed creating a fillet..."), and previously that took the entire script
+        # down with it, leaving the user with no geometry at all. Degrade instead:
+        # retry smaller, then skip the blend and keep the part.
+        try:
+            edges = list(edge_list)
+        except TypeError:
+            edges = [edge_list]
+        if not edges:
+            print("[warning] " + label + ": no edges matched the selection; left unchanged.")
+            return shape
+
+        def apply(r):
+            return shape.fillet(radius=r, edge_list=edges) if op == "fillet" \\
+                else shape.chamfer(length=r, edge_list=edges)
+
+        try:
+            return apply(size)
+        except Exception as first_error:
+            limit = None
+            if op == "fillet":
+                try:
+                    limit = shape.max_fillet(edges, tolerance=0.05)
+                except Exception:
+                    limit = None
+            fallbacks = []
+            if limit and limit > 0.05:
+                fallbacks.append(limit * 0.9)
+            fallbacks.extend([size * 0.5, size * 0.25])
+            for r in fallbacks:
+                if r is None or r <= 0.05 or r >= size:
+                    continue
+                try:
+                    result = apply(r)
+                    print("[warning] " + label + ": " + str(size) + "mm failed on these "
+                          + str(len(edges)) + " edges, applied " + str(round(r, 3)) + "mm instead.")
+                    return result
+                except Exception:
+                    continue
+            print("[warning] " + label + ": could not be applied to these " + str(len(edges))
+                  + " edges at any radius, so it was SKIPPED and the part was kept. "
+                  + "Reason: " + str(first_error)[:120])
+            return shape
+
+    def safe_fillet(shape, edge_list, radius):
+        return _safe_blend(shape, edge_list, radius, "fillet", "fillet")
+
+    def safe_chamfer(shape, edge_list, length):
+        return _safe_blend(shape, edge_list, length, "chamfer", "chamfer")
+
     local_scope["find_nearest_face"] = find_nearest_face
     local_scope["find_nearest_edge"] = find_nearest_edge
+    local_scope["safe_fillet"] = safe_fillet
+    local_scope["safe_chamfer"] = safe_chamfer
     local_scope["target_center"] = None
     local_scope["target_normal"] = None
 
@@ -1625,6 +1679,19 @@ HOST-PROVIDED HELPERS — the runtime pre-defines these, you do NOT import or as
 - \`find_nearest_face(shape, (x, y, z))\` — the face in \`shape\` whose center is closest to that point.
 - \`find_nearest_edge(shape, (x, y, z))\` — same, for edges.
 - \`target_center\` / \`target_normal\` (Vector or None) — the *currently* selected feature. Read-only conveniences.
+- \`safe_fillet(shape, edges, radius)\` / \`safe_chamfer(shape, edges, length)\` — see the fillet rule below.
+
+🚨 FILLETS AND CHAMFERS MUST NEVER KILL THE MODEL.
+
+OpenCASCADE fails on many geometrically reasonable edge sets, with errors such as \`ChFi3d_Builder: only 2 faces\` or \`Failed creating a fillet with radius of N\`. A cosmetic rounding is never worth losing the whole part, so:
+
+- Use \`safe_fillet(shape, edges, radius)\` / \`safe_chamfer(shape, edges, length)\` instead of \`.fillet()\` / \`.chamfer()\` whenever the blend is a finishing touch rather than the point of the request. They retry at a smaller radius, then skip the blend and return the unmodified shape with a warning, so the user always gets geometry.
+- **Select edges narrowly.** Never pass \`shape.edges()\` (every edge) or a broad \`filter_by(Axis.Z)\` — those sweep in hole rims, gusset intersections, and short edges where the radius cannot fit, and the whole operation fails. Filter down to the specific edges the user asked about, using position:
+  \`\`\`python
+  rear_edges = [e for e in part.edges() if abs(e.center().Y - 25.0) < 1e-6]
+  part = safe_fillet(part, rear_edges, 2.0)
+  \`\`\`
+- Apply blends **last**, after holes and cutouts exist, and keep the radius comfortably under half the local wall thickness.
 
 🚨 ALWAYS PASS EXPLICIT COORDINATES. This is the single most important rule.
 
