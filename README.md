@@ -1,10 +1,10 @@
 # Text-to-CAD Studio
 
-[繁體中文](README.md) · **[English](README.en.md)**
+**English** · [繁體中文](README.zh-TW.md)
 
-> 一個完全跑在瀏覽器裡的參數化 CAD 工作站：用自然語言描述零件 → LLM 產生 `build123d` Python → Pyodide (WebAssembly) 即時編譯 → Three.js 顯示，並可匯出 STEP / DXF。
+> A parametric CAD workstation that runs entirely in your browser: describe a part in plain language → an LLM writes `build123d` Python → Pyodide (WebAssembly) compiles it → Three.js renders it, with STEP / DXF export.
 >
-> **無後端、無伺服器。** 所有幾何運算都在你的瀏覽器分頁內完成，API Key 只存在 `localStorage`。
+> **No backend, no server.** Every geometry operation happens inside your browser tab, and your API key never leaves `localStorage`.
 
 ![status](https://img.shields.io/badge/status-experimental-orange)
 ![license](https://img.shields.io/badge/license-MIT-blue)
@@ -12,80 +12,80 @@
 
 ---
 
-## ⚠️ 目前卡關的部分（先看這裡）
+## ⚠️ Where This Is Stuck (read this first)
 
-**這個專案能跑，但「點選幾何 → 用語言修改」這件事還不夠可靠。** 這是整個專案最核心、也最難的部分，目前仍未解決。如果你打算 fork 或貢獻，這一節就是主戰場。
+**The project works, but "click a feature and modify it with words" is not reliable yet.** That is the heart of the project and the hardest part, and it remains unsolved. If you plan to fork or contribute, this section is the main battleground.
 
-### 問題本質：拓樸命名問題 (Topological Naming Problem)
+### The root cause: the Topological Naming Problem
 
-這是 CAD 領域的經典難題，不是這個專案獨有的 —— FreeCAD、OpenSCAD 生態都在跟它搏鬥。
+This is a classic, well-known problem in CAD — not something unique to this project. FreeCAD and the wider OpenSCAD ecosystem wrestle with it too.
 
-| # | 問題 | 具體狀況 | 相關程式碼 |
-|---|------|---------|-----------|
-| 1 | **特徵 ID 不穩定** | `Face_12` / `Edge_235` 是每次 tessellation 時用 `enumerate(shape.faces())` 當場編號的。腳本一重跑，OCCT 內部拓樸順序改變，同一個實體面的編號就跟著變。**選取無法跨越編輯而存活。** | `app.js` → `__wasm_run_and_tessellate()` |
-| 2 | **只能靠座標猜測** | 因為 ID 不穩，實際餵給 LLM 的是「中心座標 + 法向量 + bbox + 面積」，Python 端再用 `find_nearest_face()` / `find_nearest_edge()` 做最近距離比對。 | `app.js` → helper 注入區 |
-| 3 | **對稱件容易選錯** | 承上，在對稱或重複結構（例如 3×3 分面立方體）上，多個面的中心距離非常接近，最近距離比對經常抓錯目標。 | 同上 |
-| 4 | **只能單選** | `STATE.selectedFeature` 是單一物件而非陣列，做不到「這四條邊一起倒圓角」。 | `app.js` → `STATE` |
-| 5 | **沒有頂點選取** | 只 tessellate faces 與 edges，vertex 完全沒進 raycast 清單。 | `app.js` → `renderMesh()` |
-| 6 | **邊優先是個 hack** | 為了讓「背面被前面遮住的邊」點得到，raycaster 硬性把 `THREE.Line` 排在 `THREE.Mesh` 前面。副作用：靠近邊界的面反而點不到。 | `app.js` → `onCanvasClick()` |
-| 7 | **修改是「重寫整份腳本」** | 沒有真正的 feature tree。每次修改都要求 LLM 回傳完整腳本，前一次的修改靠 prompt 要求「累積保留」，模型偶爾還是會洗掉 —— 這也是為什麼加了 Undo。 | `app.js` → `handlePromptSubmit()` |
+| # | Problem | What actually happens | Relevant code |
+|---|---------|----------------------|---------------|
+| 1 | **Feature IDs are unstable** | `Face_12` / `Edge_235` are assigned on the fly by `enumerate(shape.faces())` during tessellation. Re-run the script and OCCT's internal topological ordering shifts, so the same physical face gets a different number. **A selection cannot survive an edit.** | `app.js` → `__wasm_run_and_tessellate()` |
+| 2 | **Selection falls back to coordinate guessing** | Because IDs are unstable, what actually reaches the LLM is "center point + normal + bbox + area", and the Python side resolves it with `find_nearest_face()` / `find_nearest_edge()` nearest-distance matching. | `app.js` → helper injection block |
+| 3 | **Symmetric parts break the heuristic** | Following from above: on symmetric or repeated geometry (a 3×3 subdivided cube, for example) several face centers sit very close together, and nearest-distance matching frequently grabs the wrong one. | same as above |
+| 4 | **Single selection only** | `STATE.selectedFeature` is a single object rather than an array, so "fillet these four edges together" is impossible. | `app.js` → `STATE` |
+| 5 | **No vertex selection** | Only faces and edges are tessellated; vertices never enter the raycast list at all. | `app.js` → `renderMesh()` |
+| 6 | **Edge-priority is a hack** | To make back-facing edges (occluded by front faces) clickable, the raycaster forcibly ranks `THREE.Line` above `THREE.Mesh`. Side effect: faces near a boundary become hard to click. | `app.js` → `onCanvasClick()` |
+| 7 | **Every edit rewrites the whole script** | There is no real feature tree. Each modification asks the LLM to return the complete script, and previous edits are preserved only because the prompt insists on it — the model still wipes them occasionally. That is precisely why Undo exists. | `app.js` → `handlePromptSubmit()` |
 
-### 可能的解法方向（歡迎 PR）
+### Possible directions (PRs very welcome)
 
-1. **改用 build123d 的語意選擇器**（最有希望）
-   讓 LLM 產生 `faces().filter_by(Axis.Z).sort_by(Axis.Z)[-1]` 這類**語意化、可重算**的選擇器，取代硬編碼座標。這樣腳本重跑後選取依然有效，才是真正的參數化。
+1. **Switch to build123d's semantic selectors** — the most promising path.
+   Have the LLM emit **semantic, recomputable** selectors like `faces().filter_by(Axis.Z).sort_by(Axis.Z)[-1]` instead of hard-coded coordinates. Selections would then stay valid after a re-run, which is what "parametric" actually means.
 
-2. **穩定的特徵指紋**
-   不用序號，改用幾何不變量組合出雜湊：`(面積, 法向, 週長, 相鄰面數, 相對重心位置)`。重算後靠指紋比對還原選取。
+2. **Stable feature fingerprints**
+   Drop sequence numbers and hash a combination of geometric invariants instead: `(area, normal, perimeter, adjacent face count, position relative to centroid)`. Restore selections by fingerprint matching after each recompute.
 
-3. **多選 + 選取集合**
-   把 `selectedFeature` 改成陣列，UI 支援 Shift 加選，prompt 一次帶入多個特徵。
+3. **Multi-select and selection sets**
+   Turn `selectedFeature` into an array, support Shift-click in the UI, and pass several features into a single prompt.
 
-4. **hover 預覽**
-   點下去之前先高亮，讓使用者確認抓到的是不是想要的那個面。
+4. **Hover preview**
+   Highlight before the click lands so the user can confirm the right face is being targeted.
 
-5. **真正的 feature tree**
-   維護「操作歷史」資料結構（`[匯入, 倒角(edge_fingerprint, 3mm), 鑽孔(face_fingerprint, ⌀5)]`），讓 LLM 只增修節點而非重寫全文。
-
----
-
-## ✨ 目前可用的功能
-
-- 🗣️ **自然語言建模** — 描述零件 → 自動產生並執行 `build123d` 腳本
-- 🖱️ **點選面 / 邊** — 點擊 3D 模型的面或邊，座標與法向自動注入下一次 prompt
-- 🔁 **自動修錯** — 編譯失敗時自動把 traceback 回傳給模型重試（最多 2 次）
-- ↩️ **Undo** — 25 步腳本歷史，AI 改壞了可以退回
-- 📐 **2D / 3D 雙模式** — 3D 出 STEP、2D 出 DXF
-- 📥 **匯入 STEP / DXF** — 在既有圖檔上繼續用語言修改
-- 🧰 **參數化工具列** — Line / Arc / Rectangle / Circle / Box / Sweep / Revolve / Boolean / Fillet…，填數值直接插入程式碼
-- ✏️ **Monaco 編輯器** — 隨時手動改 Python 再重跑
-- 📊 **Benchmark 測試組** — 內建 6 組漸進難度的標準題（校準方塊 → 叉形輕量化支架）
-- 🔑 **BYOK 多供應商** — OpenAI / OpenRouter / Anthropic / Gemini / 本地 Ollama / LM Studio
+5. **A real feature tree**
+   Maintain an operation-history data structure (`[import, chamfer(edge_fingerprint, 3mm), drill(face_fingerprint, ⌀5)]`) so the LLM appends or edits nodes rather than rewriting everything.
 
 ---
 
-## 🏗️ 技術架構
+## ✨ What Works Today
+
+- 🗣️ **Natural-language modeling** — describe a part, get a generated and executed `build123d` script
+- 🖱️ **Click to select faces / edges** — coordinates and normals are injected into the next prompt automatically
+- 🔁 **Automatic error repair** — on a compile failure the traceback is fed straight back to the model (up to 2 retries)
+- ↩️ **Undo** — 25 steps of script history, so a bad AI edit is recoverable
+- 📐 **2D / 3D dual mode** — 3D exports STEP, 2D exports DXF
+- 📥 **STEP / DXF import** — keep editing an existing drawing with language
+- 🧰 **Parametric toolbar** — Line / Arc / Rectangle / Circle / Box / Sweep / Revolve / Boolean / Fillet…, fill in values and the code is inserted
+- ✏️ **Monaco editor** — hand-edit the Python and re-run at any time
+- 📊 **Benchmark suite** — 6 built-in cases of increasing difficulty (calibration block → aerospace clevis bracket)
+- 🔑 **BYOK, multi-provider** — OpenAI / OpenRouter / Anthropic / Gemini / local Ollama / LM Studio
+
+---
+
+## 🏗️ Architecture
 
 ```mermaid
 graph TD
-    UI["index.html / index.css<br/>前端 UI"] <--> APP["app.js<br/>控制器"]
+    UI["index.html / index.css<br/>Frontend UI"] <--> APP["app.js<br/>Controller"]
     APP <--> PY["Pyodide 0.29.4<br/>CPython 3.13 → WASM"]
     PY --> B123D["build123d<br/>+ OCP.wasm (OpenCASCADE)"]
-    PY --> EZDXF["ezdxf<br/>DXF 讀寫"]
-    APP --> THREE["Three.js r128<br/>WebGL 渲染 + Raycaster"]
-    APP --> MONACO["Monaco Editor<br/>Python 語法編輯"]
-    APP <--> LLM["LLM API<br/>雲端 or 本地"]
-    APP --> LS["localStorage<br/>只存設定，不上傳"]
+    PY --> EZDXF["ezdxf<br/>DXF read/write"]
+    APP --> THREE["Three.js r128<br/>WebGL rendering + Raycaster"]
+    APP --> MONACO["Monaco Editor<br/>Python editing"]
+    APP <--> LLM["LLM API<br/>cloud or local"]
+    APP --> LS["localStorage<br/>settings only, never uploaded"]
 
-    B123D -.STEP/DXF.-> FS["Pyodide 虛擬檔案系統"]
-    FS -.下載.-> UI
+    B123D -.STEP/DXF.-> FS["Pyodide virtual filesystem"]
+    FS -.download.-> UI
 ```
 
-### 三大核心元件
+### The three core components
 
-#### 1️⃣ CAD 編譯引擎 — Pyodide + OCP.wasm
+#### 1️⃣ CAD compilation engine — Pyodide + OCP.wasm
 
-真正的難點在於 `build123d` 底層是 **OpenCASCADE (OCCT)** —— 一套龐大的 C++ 幾何核心。本專案透過 [**yeicor/OCP.wasm**](https://github.com/yeicor/OCP.wasm) 這個把 OCCT 編譯成 WebAssembly 的 wheel registry 解決：
+The real difficulty is that `build123d` sits on top of **OpenCASCADE (OCCT)** — a large C++ geometry kernel. This project solves that with [**yeicor/OCP.wasm**](https://github.com/yeicor/OCP.wasm), a wheel registry of OCCT compiled to WebAssembly:
 
 ```python
 import micropip
@@ -95,50 +95,50 @@ micropip.add_mock_package("py-lib3mf", "2.4.1", modules={"py_lib3mf": "from lib3
 await micropip.install(["build123d", "sqlite3"])
 ```
 
-首次載入約需下載 30MB 並花費 20–60 秒，之後由瀏覽器快取。
+The first load pulls roughly 30 MB and takes 20–60 seconds; after that the browser caches it.
 
-#### 2️⃣ AI 推論引擎 — BYOK 雙軌制
+#### 2️⃣ AI inference engine — dual-track BYOK
 
-統一的 `generateCAD()` 分派器，設定存在 `localStorage.cad_ai_config`：
+A single `generateCAD()` dispatcher, with configuration stored in `localStorage.cad_ai_config`:
 
-| Provider | 端點 | 備註 |
-|----------|------|------|
-| OpenAI | `https://api.openai.com/v1` | 標準 `/chat/completions` |
-| OpenRouter | `https://openrouter.ai/api/v1` | 需帶 `HTTP-Referer` |
+| Provider | Endpoint | Notes |
+|----------|----------|-------|
+| OpenAI | `https://api.openai.com/v1` | standard `/chat/completions` |
+| OpenRouter | `https://openrouter.ai/api/v1` | requires `HTTP-Referer` |
 | Anthropic | `https://api.anthropic.com/v1` | `x-api-key` + `anthropic-version` |
-| Google Gemini | `generativelanguage.googleapis.com` | 專用 schema，含模型 fallback 與 429/503 重試 |
-| 本地 | `http://localhost:11434/v1` (Ollama)<br/>`http://localhost:1234/v1` (LM Studio) | 完全離線可用 |
+| Google Gemini | `generativelanguage.googleapis.com` | dedicated schema, with model fallback and 429/503 retries |
+| Local | `http://localhost:11434/v1` (Ollama)<br/>`http://localhost:1234/v1` (LM Studio) | fully offline capable |
 
-#### 3️⃣ 3D 視覺化與互動 — Three.js
+#### 3️⃣ 3D visualization and interaction — Three.js
 
-Python 端把每個 face 個別 tessellate 成 `{vertices, indices, center, normal, bbox, area}` JSON，JS 端為**每一個面建立獨立的 `THREE.Mesh`**（而非整體一個），把特徵資訊掛在 `mesh.userData` 上，這樣 Raycaster 才能分辨點到哪一個面。
+The Python side tessellates each face individually into `{vertices, indices, center, normal, bbox, area}` JSON. The JS side then builds **a separate `THREE.Mesh` for every face** (rather than one mesh for the whole body) and attaches the feature metadata to `mesh.userData`, which is what lets the raycaster tell one face from another.
 
 ```
 Python: shape.faces() → tessellate → JSON
    ↓
-JS: 每個 face 一個 Mesh，userData = { id, center, normal, bbox, area }
+JS: one Mesh per face, userData = { id, center, normal, bbox, area }
    ↓
-Raycaster 點擊 → 高亮 + 注入 prompt context
+Raycaster click → highlight + inject prompt context
 ```
 
 ---
 
-## 🔗 使用到的專案
+## 🔗 Projects Used
 
-| 專案 | 用途 | 授權 |
-|------|------|------|
-| [earthtojake/text-to-cad](https://github.com/earthtojake/text-to-cad) | Agent skills 集合，本專案的設計理念來源與 system prompt 規範基礎 | 見上游 |
-| [build123d](https://github.com/gumyr/build123d) | Python 參數化 CAD 建模函式庫 | Apache-2.0 |
-| [yeicor/OCP.wasm](https://github.com/yeicor/OCP.wasm) | OpenCASCADE 的 WebAssembly wheel registry ⭐ 讓一切成為可能 | LGPL-2.1 |
-| [Pyodide](https://pyodide.org/) | 瀏覽器內的 CPython 執行環境 | MPL-2.0 |
-| [Three.js](https://threejs.org/) | WebGL 3D 渲染與 Raycasting | MIT |
-| [Monaco Editor](https://microsoft.github.io/monaco-editor/) | VS Code 同款程式碼編輯器 | MIT |
-| [ezdxf](https://github.com/mozman/ezdxf) | DXF 讀寫 | MIT |
-| [Chart.js](https://www.chartjs.org/) | 用量儀表板圖表 | MIT |
+| Project | Role | License |
+|---------|------|---------|
+| [earthtojake/text-to-cad](https://github.com/earthtojake/text-to-cad) | Agent-skills collection; the design inspiration and the basis for this project's system prompt conventions | see upstream |
+| [build123d](https://github.com/gumyr/build123d) | Python parametric CAD modeling library | Apache-2.0 |
+| [yeicor/OCP.wasm](https://github.com/yeicor/OCP.wasm) | OpenCASCADE as a WebAssembly wheel registry ⭐ the thing that makes this possible | LGPL-2.1 |
+| [Pyodide](https://pyodide.org/) | CPython runtime in the browser | MPL-2.0 |
+| [Three.js](https://threejs.org/) | WebGL rendering and raycasting | MIT |
+| [Monaco Editor](https://microsoft.github.io/monaco-editor/) | The editor from VS Code | MIT |
+| [ezdxf](https://github.com/mozman/ezdxf) | DXF read/write | MIT |
+| [Chart.js](https://www.chartjs.org/) | Usage dashboard charts | MIT |
 
 ---
 
-## 🚀 快速開始
+## 🚀 Quick Start
 
 ```bash
 git clone https://github.com/drogertieni/text-to-cad-studio.git
@@ -147,68 +147,68 @@ npm install
 npm run dev
 ```
 
-開啟 <http://localhost:8000>，等待 Pyodide 與 build123d 載入完成（首次約 20–60 秒）。
+Open <http://localhost:8000> and wait for Pyodide and build123d to finish loading (20–60 seconds on first run).
 
-> ⚠️ 必須透過 HTTP 伺服器開啟，直接雙擊 `index.html` 會因為 CORS 而無法載入 Pyodide。
+> ⚠️ You must serve it over HTTP. Double-clicking `index.html` will fail to load Pyodide because of CORS.
 
-### 設定 AI
+### Configuring the AI
 
-點右上角 ⚙️ → 選 Provider → 填入 API Key 或本地端點 → Save。
+Click ⚙️ in the top right → pick a provider → enter your API key or local endpoint → Save.
 
-**本地離線方案（不需要任何 API Key）：**
+**Fully local, no API key required:**
 
 ```bash
 ollama serve
 ollama pull qwen2.5-coder
 ```
 
-然後在設定裡選「Local Endpoint」，端點填 `http://localhost:11434/v1`。
+Then choose "Local Endpoint" in settings and set the endpoint to `http://localhost:11434/v1`.
 
 ---
 
-## 🔐 隱私與安全
+## 🔐 Privacy and Security
 
-- **API Key 只存在你瀏覽器的 `localStorage`**，不會寫入任何檔案、不會送到本專案的任何伺服器（本專案根本沒有伺服器）。
-- 請求直接從你的瀏覽器送到你選擇的 LLM 供應商。
-- 本 repo 的 `.gitignore` 已排除 `.env`、`*.key` 等常見機密檔案樣式。
-- 若要換掉 Key，設定面板覆寫即可；要完全清除請清空瀏覽器的網站資料。
+- **Your API key lives only in your browser's `localStorage`.** It is never written to a file and never sent to any server belonging to this project — this project has no server.
+- Requests go directly from your browser to whichever LLM provider you chose.
+- This repo's `.gitignore` already excludes common secret-file patterns such as `.env` and `*.key`.
+- To swap a key, just overwrite it in the settings panel; to remove it completely, clear the site data in your browser.
 
 ---
 
-## 📁 專案結構
+## 📁 Project Layout
 
 ```
 .
-├── index.html        # 主應用程式（UI、工具列、設定面板）
-├── index.css         # 樣式
-├── app.js            # 核心控制器（Pyodide / Three.js / LLM 分派 / system prompt）
-├── dashboard.html    # 用量儀表板
+├── index.html        # Main app (UI, toolbar, settings panel)
+├── index.css         # Styles
+├── app.js            # Core controller (Pyodide / Three.js / LLM dispatch / system prompt)
+├── dashboard.html    # Usage dashboard
 ├── dashboard.css
 ├── dashboard.js
-├── aluminum_bar.py   # build123d 範例腳本
-└── package.json      # 只有 http-server 一個 devDependency
+├── aluminum_bar.py   # Example build123d script
+└── package.json      # A single devDependency: http-server
 ```
 
-`app.js` 的主要區塊：
+Main sections of `app.js`:
 
-| 區塊 | 職責 |
-|------|------|
-| `STATE` | 全域狀態（Pyodide、編輯器、選取特徵、腳本歷史） |
-| `initPyodide()` | 載入 WASM 執行環境與 build123d |
-| `runPythonCode()` | 執行使用者腳本、注入選取 helper、tessellate、匯出 |
-| `initThree()` / `onCanvasClick()` | 3D 場景與點選 raycasting |
-| `getSystemPrompt()` | LLM 的 system prompt（含 build123d 操作範例） |
-| `generateCAD()` | 多供應商 API 分派 |
-| `TOOLBAR_CONFIG` | 參數化工具列定義 |
+| Section | Responsibility |
+|---------|----------------|
+| `STATE` | Global state (Pyodide, editor, selected feature, script history) |
+| `initPyodide()` | Load the WASM runtime and build123d |
+| `runPythonCode()` | Execute the user script, inject selection helpers, tessellate, export |
+| `initThree()` / `onCanvasClick()` | 3D scene and click raycasting |
+| `getSystemPrompt()` | The LLM system prompt (including build123d operation examples) |
+| `generateCAD()` | Multi-provider API dispatch |
+| `TOOLBAR_CONFIG` | Parametric toolbar definitions |
 
 ---
 
-## 🤝 貢獻
+## 🤝 Contributing
 
-最需要幫忙的就是上面「卡關」那一節。若你對 **拓樸命名問題**、**build123d 選擇器**、或 **CAD 幾何選取 UX** 有想法，非常歡迎開 Issue 討論或直接送 PR。
+The most valuable help is on the "Where This Is Stuck" section above. If you have ideas about the **topological naming problem**, **build123d selectors**, or **CAD selection UX** in general, please open an issue to discuss or send a PR directly.
 
-## 📄 授權
+## 📄 License
 
-MIT — 詳見 [LICENSE](LICENSE)。
+MIT — see [LICENSE](LICENSE).
 
-請注意各相依專案有各自的授權條款，特別是 **OCP.wasm (LGPL-2.1)** 與 **build123d (Apache-2.0)**。
+Note that each dependency carries its own license, in particular **OCP.wasm (LGPL-2.1)** and **build123d (Apache-2.0)**.
