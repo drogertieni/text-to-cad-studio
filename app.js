@@ -2299,6 +2299,19 @@ function formatPoint(p, digits = 2) {
     return `(${p[0].toFixed(digits)}, ${p[1].toFixed(digits)}, ${p[2].toFixed(digits)})`;
 }
 
+// Wraps a primitive in `with Locations(...)` so it can be placed away from the
+// origin. Emitted only when the position is non-zero, keeping simple cases clean.
+// Locations is the builder-mode way to position geometry — the primitives
+// themselves take no coordinate argument.
+function atPosition(code, x, y, z = 0) {
+    const px = Number(x) || 0;
+    const py = Number(y) || 0;
+    const pz = Number(z) || 0;
+    if (!px && !py && !pz) return code;
+    const body = code.split('\n').map(l => '    ' + l).join('\n');
+    return `with Locations((${px}, ${py}, ${pz})):\n${body}`;
+}
+
 // Which endpoint the next curve should start from. Defaults to the end of the
 // selected edge, but clicking the Start chip snaps it to the other end instead,
 // so a chain can be continued from whichever side the user means.
@@ -2363,18 +2376,25 @@ const TOOLBAR_CONFIG = {
         fields: [
             { label: "Width", name: "width", type: "number", default: 20 },
             { label: "Height", name: "height", type: "number", default: 10 },
-            { label: "Rounded Corner Radius", name: "radius", type: "number", default: 0 }
+            { label: "Rounded Corner Radius", name: "radius", type: "number", default: 0 },
+            { label: "Centre X", name: "px", type: "number", default: () => snapCoord(0) },
+            { label: "Centre Y", name: "py", type: "number", default: () => snapCoord(1) }
         ],
-        generator: (vals) => vals.radius > 0 
-            ? `RectangleRounded(${vals.width}, ${vals.height}, ${vals.radius})` 
-            : `Rectangle(${vals.width}, ${vals.height})`
+        generator: (vals) => atPosition(
+            vals.radius > 0
+                ? `RectangleRounded(${vals.width}, ${vals.height}, ${vals.radius})`
+                : `Rectangle(${vals.width}, ${vals.height})`,
+            vals.px, vals.py
+        )
     },
     circle: {
         title: "Create Circle",
         fields: [
-            { label: "Radius", name: "radius", type: "number", default: 10 }
+            { label: "Radius", name: "radius", type: "number", default: 10 },
+            { label: "Centre X", name: "px", type: "number", default: () => snapCoord(0) },
+            { label: "Centre Y", name: "py", type: "number", default: () => snapCoord(1) }
         ],
-        generator: (vals) => `Circle(${vals.radius})`
+        generator: (vals) => atPosition(`Circle(${vals.radius})`, vals.px, vals.py)
     },
     bezier: {
         title: "Create Bezier Curve",
@@ -2395,18 +2415,29 @@ const TOOLBAR_CONFIG = {
         title: "Create Regular Polygon",
         fields: [
             { label: "Radius", name: "radius", type: "number", default: 10 },
-            { label: "Number of Sides", name: "sides", type: "number", default: 6 }
+            { label: "Number of Sides", name: "sides", type: "number", default: 6 },
+            { label: "Centre X", name: "px", type: "number", default: () => snapCoord(0) },
+            { label: "Centre Y", name: "py", type: "number", default: () => snapCoord(1) }
         ],
-        generator: (vals) => `RegularPolygon(radius=${vals.radius}, side_count=${vals.sides})`
+        generator: (vals) => atPosition(
+            `RegularPolygon(radius=${vals.radius}, side_count=${vals.sides})`,
+            vals.px, vals.py
+        )
     },
     box: {
         title: "Create 3D Box",
         fields: [
             { label: "Length (X)", name: "length", type: "number", default: 20 },
             { label: "Width (Y)", name: "width", type: "number", default: 20 },
-            { label: "Height (Z)", name: "height", type: "number", default: 20 }
+            { label: "Height (Z)", name: "height", type: "number", default: 20 },
+            { label: "Centre X", name: "px", type: "number", default: () => snapCoord(0) },
+            { label: "Centre Y", name: "py", type: "number", default: () => snapCoord(1) },
+            { label: "Centre Z", name: "pz", type: "number", default: () => snapCoord(2) }
         ],
-        generator: (vals) => `Box(${vals.length}, ${vals.width}, ${vals.height})`
+        generator: (vals) => atPosition(
+            `Box(${vals.length}, ${vals.width}, ${vals.height})`,
+            vals.px, vals.py, vals.pz
+        )
     },
     "thick-solid": {
         title: "Create Thick Solid (Shell)",
@@ -2746,10 +2777,14 @@ function renderParameterForm(config) {
     // Tell the user when a start point was pre-filled from their selection,
     // otherwise the non-zero defaults look arbitrary.
     const snap = snapPointForNextCurve();
-    if (snap && (currentToolbarAction === 'line' || currentToolbarAction === 'arc')) {
+    const snapsStart = config.fields.some(f => f.name === 'x1');
+    const snapsCentre = config.fields.some(f => f.name === 'px');
+    if (snap && (snapsStart || snapsCentre)) {
         const hint = document.createElement('div');
         hint.className = 'param-snap-hint';
-        hint.innerHTML = `<i class="fa-solid fa-link"></i> Starting from ${formatPoint(snap)} — continues the selected edge.`;
+        hint.innerHTML = snapsStart
+            ? `<i class="fa-solid fa-link"></i> Starting from ${formatPoint(snap)} — continues the selected edge.`
+            : `<i class="fa-solid fa-crosshairs"></i> Centred on ${formatPoint(snap)} — from your selection. Set to 0 for the origin.`;
         container.appendChild(hint);
     }
 
@@ -2824,7 +2859,14 @@ const PART_SNIPPET_RE = /^(Box|Cylinder|Sphere|Cone|Torus|extrude|sweep|revolve|
 const BUILDER_SNIPPET_RE = /^(offset|mirror|fillet|chamfer)\s*\(/;
 
 function classifyToolbarSnippet(text) {
-    const firstCodeLine = text.split('\n').map(l => l.trim()).find(l => l && !l.startsWith('#')) || '';
+    const codeLines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+    // A `with Locations(...):` wrapper says where the primitive goes, not what it
+    // is — classify by the primitive inside, or the snippet lands outside its
+    // builder block and the target variable never gets defined.
+    let firstCodeLine = codeLines[0] || '';
+    if (/^with\s+Locations\s*\(/.test(firstCodeLine)) {
+        firstCodeLine = codeLines[1] || '';
+    }
     if (LINE_SNIPPET_RE.test(firstCodeLine)) return 'line';
     if (SKETCH_SNIPPET_RE.test(firstCodeLine)) return 'sketch';
     if (PART_SNIPPET_RE.test(firstCodeLine)) return 'part';
