@@ -1719,6 +1719,42 @@ OpenCASCADE fails on many geometrically reasonable edge sets, with errors such a
   \`\`\`
 - Apply blends **last**, after holes and cutouts exist, and keep the radius comfortably under half the local wall thickness.
 
+🚨 BLADES, VANES, FINS, RIBS AND SPIRAL FEATURES.
+
+These are the most commonly botched shapes. Rules that prevent the usual failure:
+
+- **Never confuse height with radial length.** \`blade_height\` is the Z extent. Do NOT write \`tip_radius = hub_radius + blade_height\` — derive the tip radius from the outer diameter instead.
+- **Curve in the PLANE, extrude in Z.** A backward-curved impeller blade is curved in *plan view*. Build its closed 2D footprint in the XY plane, then \`extrude()\` it vertically at constant height. Do NOT \`loft()\` between a low inner profile and a high outer profile — that produces a tilted spike sticking into the air, not a vane.
+- **Thickness is perpendicular to the centerline**, i.e. tangential, not radial. Offset each centerline point along the unit normal \`(-dy, dx)/|d|\`, never along the radius.
+- **Features must sit on the surface they belong to.** Blades start at the top of the backplate, not at the top of the hub, or they float in mid-air.
+- **Stay inside the outer boundary** — the blade tip radius must be ≤ the backplate radius, otherwise blades poke out past the rim.
+- Always \`from math import cos, sin, radians\` before using them.
+
+Working pattern for one curved blade (adapt the numbers):
+\`\`\`python
+def blade_footprint(theta0_deg, r0, r1, sweep_deg, thickness, steps=24):
+    center = []
+    for i in range(steps + 1):
+        t = i / steps
+        r = r0 + t * (r1 - r0)
+        th = radians(theta0_deg - t * sweep_deg)   # trailing back = backward-curved
+        center.append((r * cos(th), r * sin(th)))
+    left, right = [], []
+    for i, (x, y) in enumerate(center):
+        j = min(i + 1, len(center) - 1); k = max(i - 1, 0)
+        dx = center[j][0] - center[k][0]; dy = center[j][1] - center[k][1]
+        L = (dx*dx + dy*dy) ** 0.5 or 1.0
+        nx, ny = -dy / L, dx / L                   # unit normal
+        left.append((x + nx*thickness/2, y + ny*thickness/2))
+        right.append((x - nx*thickness/2, y - ny*thickness/2))
+    return left + list(reversed(right))
+
+for b in range(n_blades):
+    with BuildSketch(Plane.XY.offset(plate_t)) as sk:
+        Polygon(*blade_footprint(b * 360.0/n_blades, hub_r, plate_r - 4, 45.0, blade_t), align=None)
+    extrude(amount=blade_h)
+\`\`\`
+
 🚨 ALWAYS PASS EXPLICIT COORDINATES. This is the single most important rule.
 
 Write \`find_nearest_face(existing, (16.540, 25.000, 16.540))\` — copy the literal numbers out of [Context].
