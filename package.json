@@ -1,7 +1,25 @@
 {
   "name": "text-to-cad-web",
   "version": "1.0.0",
-  "description": "Graphical Text-to-CAD application running build123d client-side.",
+  "description": "Browser-native parametric CAD: natural language -> build123d -> Pyodide (WASM) -> STEP/DXF. No backend.",
+  "keywords": [
+    "cad",
+    "build123d",
+    "pyodide",
+    "webassembly",
+    "threejs",
+    "opencascade",
+    "text-to-cad",
+    "llm",
+    "parametric-design",
+    "browser-based"
+  ],
+  "homepage": "https://github.com/drogertieni/text-to-cad-studio",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/drogertieni/text-to-cad-studio.git"
+  },
+  "license": "MIT",
   "main": "index.html",
   "scripts": {
     "dev": "npx http-server -p 8000"
