@@ -1006,17 +1006,41 @@ def __wasm_run_and_tessellate(code_to_run, is_2d, target_info):
     except Exception:
         _B123dVector = None
 
-    def _to_vector(v):
+    def _resolve_center(center, kind):
+        # NOTE: the None check must happen BEFORE any Vector conversion, otherwise
+        # Vector(*None) raises "argument after * must be an iterable, not NoneType".
+        if center is None:
+            center = local_scope.get("target_center")
+            if center is not None:
+                # Falling back to the live selection makes the script depend on
+                # mutable outside state: re-running it after the user selects a
+                # different feature silently retargets this operation. Warn loudly.
+                print(
+                    "[warning] " + kind + "() was called without explicit coordinates, so it fell "
+                    "back to the currently selected feature. This makes the edit unstable — when "
+                    "this script is re-run after a different selection, the operation will move. "
+                    "Bake the coordinate in instead: " + kind + "(shape, (x, y, z))."
+                )
+        if center is None:
+            return None
         if _B123dVector is None:
-            return v
-        if isinstance(v, _B123dVector):
-            return v
-        return _B123dVector(*v)
+            return center
+        if isinstance(center, _B123dVector):
+            return center
+        try:
+            return _B123dVector(*center)
+        except TypeError:
+            raise ValueError(
+                kind + ": center must be a Vector or an (x, y, z) sequence, got " + repr(center)
+            )
 
     def find_nearest_face(shape, center=None, tolerance=None):
-        c = _to_vector(center if center is not None else local_scope.get("target_center"))
+        c = _resolve_center(center, "find_nearest_face")
         if c is None:
-            raise ValueError("find_nearest_face: no center provided and target_center is not set")
+            raise ValueError(
+                "find_nearest_face: no coordinates given and nothing is currently selected. "
+                "Pass them explicitly: find_nearest_face(shape, (x, y, z))"
+            )
         faces = list(shape.faces())
         if not faces:
             raise ValueError("find_nearest_face: shape has no faces")
@@ -1027,9 +1051,12 @@ def __wasm_run_and_tessellate(code_to_run, is_2d, target_info):
         return min(faces, key=lambda f: (f.center() - c).length)
 
     def find_nearest_edge(shape, center=None, tolerance=None):
-        c = _to_vector(center if center is not None else local_scope.get("target_center"))
+        c = _resolve_center(center, "find_nearest_edge")
         if c is None:
-            raise ValueError("find_nearest_edge: no center provided and target_center is not set")
+            raise ValueError(
+                "find_nearest_edge: no coordinates given and nothing is currently selected. "
+                "Pass them explicitly: find_nearest_edge(shape, (x, y, z))"
+            )
         edges = list(shape.edges())
         if not edges:
             raise ValueError("find_nearest_edge: shape has no edges")
@@ -1594,31 +1621,56 @@ with BuildPart() as bp:
 part = bp.part
 \`\`\`
 
-HOST-PROVIDED HELPERS — the runtime pre-defines these names, you do NOT need to import or assign them:
-- \`target_center\` (Vector) — center of the currently selected face or edge (or None if nothing selected).
-- \`target_normal\` (Vector) — outward normal of the selected face (or None for edges).
-- \`find_nearest_face(shape, center=None)\` — returns the face in \`shape\` whose center is closest to \`center\` (defaults to \`target_center\`).
-- \`find_nearest_edge(shape, center=None)\` — same but for edges.
+HOST-PROVIDED HELPERS — the runtime pre-defines these, you do NOT import or assign them:
+- \`find_nearest_face(shape, (x, y, z))\` — the face in \`shape\` whose center is closest to that point.
+- \`find_nearest_edge(shape, (x, y, z))\` — same, for edges.
+- \`target_center\` / \`target_normal\` (Vector or None) — the *currently* selected feature. Read-only conveniences.
 
-Always use these helpers when the user references a selected feature. Never write \`target_center = Vector(...)\` yourself — it is already defined. Never use any other undefined variable.
+🚨 ALWAYS PASS EXPLICIT COORDINATES. This is the single most important rule.
 
-3D — extrude/extend an imported STEP part along the selected face's outward normal (e.g. "extend this face right by 10mm"):
+Write \`find_nearest_face(existing, (16.540, 25.000, 16.540))\` — copy the literal numbers out of [Context].
+NEVER write the bare \`find_nearest_face(existing)\`.
+
+Why this matters: \`target_center\` changes every time the user clicks something new. A script containing a bare \`find_nearest_face(existing)\` silently retargets when it is re-run under a different selection, so the user's earlier edit jumps to the new face and appears to vanish. Baking the coordinate into each call is what makes edits accumulate correctly. Each operation must permanently remember its own location.
+
+Give each operation a distinct, descriptive variable name (\`extended_face\`, \`fillet_edge\`, \`bore_face\`) rather than reusing \`target_face\` for everything — the script will accumulate several of them.
+
+3D — extend a face outward along its normal (e.g. "extend this face 10mm"):
 \`\`\`python
 from build123d import *
 existing = import_step("/cad_imports/EXISTING_PATH.stp")
-target_face = find_nearest_face(existing)
-extension = Solid.extrude(target_face, target_face.normal_at(target_face.center()) * 10)
+extended_face = find_nearest_face(existing, (16.540, 25.000, 16.540))
+extension = Solid.extrude(extended_face, extended_face.normal_at(extended_face.center()) * 10)
 part = existing + extension
+\`\`\`
+
+3D — a SECOND edit stacked on the first. Note that edit 1 keeps its own hard-coded coordinate, and the new operation is applied to the result of edit 1 (\`part\`), not to \`existing\`:
+\`\`\`python
+from build123d import *
+existing = import_step("/cad_imports/EXISTING_PATH.stp")
+
+# --- edit 1: extend a face by 10mm (coordinates frozen, do not touch) ---
+extended_face = find_nearest_face(existing, (16.540, 25.000, 16.540))
+part = existing + Solid.extrude(extended_face, extended_face.normal_at(extended_face.center()) * 10)
+
+# --- edit 2: drill a 6mm hole through a different face ---
+bore_face = find_nearest_face(part, (0.000, 25.000, 25.000))
+with BuildPart() as bp:
+    add(part)
+    with BuildSketch(Plane(bore_face)) as sk:
+        Circle(3)
+    extrude(amount=-50, mode=Mode.SUBTRACT)
+part = bp.part
 \`\`\`
 
 3D — drill a hole through the selected face (subtract):
 \`\`\`python
 from build123d import *
 existing = import_step("/cad_imports/EXISTING_PATH.stp")
-target_face = find_nearest_face(existing)
+bore_face = find_nearest_face(existing, (0.000, 25.000, 25.000))
 with BuildPart() as bp:
     add(existing)
-    with BuildSketch(Plane(target_face)) as sk:
+    with BuildSketch(Plane(bore_face)) as sk:
         Circle(3)            # radius in mm
     extrude(amount=-20, mode=Mode.SUBTRACT)
 part = bp.part
@@ -1628,25 +1680,25 @@ part = bp.part
 \`\`\`python
 from build123d import *
 existing = import_step("/cad_imports/EXISTING_PATH.stp")
-target_edge = find_nearest_edge(existing)
-part = existing.fillet(radius=3.0, edge_list=[target_edge])
+fillet_edge = find_nearest_edge(existing, (9.080, 25.000, 16.540))
+part = existing.fillet(radius=3.0, edge_list=[fillet_edge])
 \`\`\`
 
 3D — CHAMFER (倒角) the selected edge:
 \`\`\`python
 from build123d import *
 existing = import_step("/cad_imports/EXISTING_PATH.stp")
-target_edge = find_nearest_edge(existing)
-part = existing.chamfer(length=3.0, edge_list=[target_edge])
+chamfer_edge = find_nearest_edge(existing, (9.080, 25.000, 16.540))
+part = existing.chamfer(length=3.0, edge_list=[chamfer_edge])
 \`\`\`
 
 3D — add a 1mm × 1mm rib along the selected edge by 10mm (edges have no thickness, so "extend an edge" becomes a small prism along its direction):
 \`\`\`python
 from build123d import *
 existing = import_step("/cad_imports/EXISTING_PATH.stp")
-target_edge = find_nearest_edge(existing)
-edge_dir = (target_edge.end_point() - target_edge.start_point()).normalized()
-plane = Plane(origin=target_edge.end_point(), z_dir=edge_dir)
+rib_edge = find_nearest_edge(existing, (25.000, 17.040, 25.000))
+edge_dir = (rib_edge.end_point() - rib_edge.start_point()).normalized()
+plane = Plane(origin=rib_edge.end_point(), z_dir=edge_dir)
 with BuildPart() as rib:
     with BuildSketch(plane) as sk:
         Rectangle(1.0, 1.0)
@@ -1960,6 +2012,17 @@ async function generateCAD(promptText) {
 }
 
 // CAD Toolbar Logic
+// Build an explicit find_nearest_face(...) call pinned to the coordinates of the
+// feature selected right now. Snippets must not emit a bare find_nearest_face(part):
+// that resolves against the live selection, so re-running the script after the user
+// clicks elsewhere would silently move the operation onto the new face.
+function selectedFaceLookup(shapeVar = 'part') {
+    const center = STATE.selectedFeature && STATE.selectedFeature.center;
+    if (!center) return null;
+    const coords = center.map(v => v.toFixed(3)).join(', ');
+    return `find_nearest_face(${shapeVar}, (${coords}))`;
+}
+
 const TOOLBAR_CONFIG = {
     line: {
         title: "Create Line",
@@ -2039,8 +2102,11 @@ const TOOLBAR_CONFIG = {
             { label: "Thickness (negative for outer, positive for inner)", name: "thickness", type: "number", default: -2 }
         ],
         generator: (vals) => {
-            if (STATE.selectedFeature && STATE.selectedFeature.type === 'face') {
-                return `offset(amount=${vals.thickness}, openings=find_nearest_face(part))`;
+            const lookup = STATE.selectedFeature && STATE.selectedFeature.type === 'face'
+                ? selectedFaceLookup()
+                : null;
+            if (lookup) {
+                return `offset(amount=${vals.thickness}, openings=${lookup})`;
             }
             return `offset(amount=${vals.thickness})`;
         }
@@ -2086,8 +2152,11 @@ const TOOLBAR_CONFIG = {
             { label: "Extrusion depth to subtract", name: "depth", type: "number", default: 10 }
         ],
         generator: (vals) => {
-            if (STATE.selectedFeature && STATE.selectedFeature.type === 'face') {
-                return `# Subtracting selected face\nwith BuildSketch(find_nearest_face(part)) as sketch:\n    # Inner geometry to subtract\n    pass\nextrude(amount=-${vals.depth}, mode=Mode.SUBTRACT)`;
+            const lookup = STATE.selectedFeature && STATE.selectedFeature.type === 'face'
+                ? selectedFaceLookup()
+                : null;
+            if (lookup) {
+                return `# Subtracting selected face\nwith BuildSketch(${lookup}) as sketch:\n    # Inner geometry to subtract\n    pass\nextrude(amount=-${vals.depth}, mode=Mode.SUBTRACT)`;
             }
             return `# Define subtraction manually\nextrude(amount=-${vals.depth}, mode=Mode.SUBTRACT)`;
         }
@@ -2121,8 +2190,11 @@ const TOOLBAR_CONFIG = {
             { label: "Mode", name: "mode", type: "select", options: ["ADD", "SUBTRACT", "INTERSECT"], default: "ADD" }
         ],
         generator: (vals) => {
-            if (STATE.selectedFeature && STATE.selectedFeature.type === 'face') {
-                return `with BuildSketch(find_nearest_face(part)) as sketch:\n    # Define sketch geometry here\n    pass\nextrude(amount=${vals.amount}, mode=Mode.${vals.mode})`;
+            const lookup = STATE.selectedFeature && STATE.selectedFeature.type === 'face'
+                ? selectedFaceLookup()
+                : null;
+            if (lookup) {
+                return `with BuildSketch(${lookup}) as sketch:\n    # Define sketch geometry here\n    pass\nextrude(amount=${vals.amount}, mode=Mode.${vals.mode})`;
             }
             return `extrude(amount=${vals.amount}, mode=Mode.${vals.mode})`;
         }
@@ -2161,8 +2233,11 @@ const TOOLBAR_CONFIG = {
             { label: "Plane / Axis", name: "plane", type: "select", options: ["XY", "YZ", "XZ"], default: "XY" }
         ],
         generator: (vals) => {
-            if (STATE.selectedFeature && STATE.selectedFeature.type === 'face') {
-                return `with BuildSketch(find_nearest_face(part)) as sketch:`;
+            const lookup = STATE.selectedFeature && STATE.selectedFeature.type === 'face'
+                ? selectedFaceLookup()
+                : null;
+            if (lookup) {
+                return `with BuildSketch(${lookup}) as sketch:`;
             }
             return `with BuildSketch(Plane.${vals.plane}) as sketch:`;
         }
